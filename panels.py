@@ -101,7 +101,7 @@ class Panel(ui.LayoutView):
         parts = [gallery(f"{kind}.jpg", f"{BRAND} {kind}"), ui.Separator()]
         if kind == "assistance":
             parts.extend([
-                ui.TextDisplay("**✉️ River City Roleplay Support Desk**\nNeed help? Open a ticket and a staff member will review your request. Choose the team that best matches your issue."),
+                ui.TextDisplay("**✉️ River City Roleplay Assistance**\nNeed help in the city? Choose a support type below to open a private ticket.\n\n**General Support** handles server questions, player reports, and help with sessions.\n**High Rank Support** goes directly to management for staff concerns or sensitive issues.\n\nTell us what happened and who was involved so the right team can help."),
                 ui.ActionRow(DeskMenu(intake)), ui.Separator(),
                 ui.TextDisplay("-# Ticket content may be reviewed by the assigned team and server administrators for moderation, safety, and support quality."),
             ])
@@ -128,6 +128,8 @@ class Panel(ui.LayoutView):
     async def on_error(self, interaction, error, item):
         import logging
         logging.getLogger(__name__).exception("Panel interaction failed", exc_info=error)
+        if isinstance(error, discord.HTTPException) and error.code in {10062, 40060}:
+            return
         if not interaction.response.is_done():
             await interaction.response.send_message("This action failed. Ask staff to check the bot permissions.", ephemeral=True)
         else:
