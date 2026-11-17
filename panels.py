@@ -9,11 +9,11 @@ from discord import ui
 BRAND = "River City Roleplay"
 ASSETS = Path(__file__).with_name("assets")
 RULES = {
-    "Discord Regulations": "Treat other members respectfully. Keep chat in its designated channel. Avoid spam, harassment, impersonation and sharing private information. Use the assistance desk to report a concern.",
-    "In-Game Regulations": "Stay in character during scenes. Give other players time to respond, roleplay collisions and injuries, and keep out-of-character information out of your character’s decisions.",
-    "Banned Vehicles & Items": "Check with the session host before using restricted vehicles, weapons or equipment. Ask General Support about a specific model or item.",
-    "Booster Vehicles": "Confirm your booster access and the current vehicle list with staff before spawning a booster vehicle.",
-    "Graphical Guidelines": "Use department-approved liveries and uniforms when acting in an official role. Ask staff to check custom graphics before using them in a session.",
+    "Discord Regulations": "**Respect other members**\nDiscuss the scene or the decision without attacking the person behind it. Slurs, harassment, threats, and repeated unwanted DMs can be reported to the assistance desk.\n\n**Use the right channel**\nKeep session coordination in the sessions channel and reports in a private ticket. Ask once, give staff time to respond, and avoid repeated mentions or mass pings.\n\n**Protect private information**\nKeep real names, contact details, and private conversations out of public chat. When submitting evidence, crop unrelated messages and identify the time, channel, and people involved.\n\n**Resolve disagreements**\nIf staff pause a scene, follow their direction and let other players continue. Open a ticket afterward with the relevant message link or clip. Use High Rank Support for sensitive staff concerns.",
+    "In-Game Regulations": "**Start scenes fairly**\nGive other players a reason to engage and time to react. Establish what your character can actually see or hear. Information learned from a stream, Discord call, or player list stays out of the scene.\n\n**Play consequences**\nRoleplay collisions, injuries, arrests, and vehicle damage. A character who has just crashed should give responders a chance to assess the scene before driving away.\n\n**Keep control of your character**\nDescribe your own actions and let others decide their reactions. Avoid forcing outcomes, using glitches, resetting to escape detention, or returning immediately to a scene after your character has died.\n\n**Respect scene boundaries**\nGive active calls space. Ask the host before staging a large event or entering a restricted department scene. If a dispute stops play, note the time and use the assistance desk so the session can continue.",
+    "Banned Vehicles & Items": "**Check session restrictions**\nRead the host’s briefing before spawning special vehicles or equipment. Restrictions can change with the department, event, or training scenario. Ask about the exact model when its status is unclear.\n\n**Match the vehicle to your role**\nUse a department vehicle only when authorized to act for that department. Emergency lights, liveries, and equipment should match the assignment you are playing.\n\n**Keep scenes accessible**\nPark clear of spawn points, station exits, and active scenes. Avoid using vehicles or props to obstruct other players outside an agreed roleplay scenario.\n\n**Request a ruling**\nGive General Support the vehicle name, intended use, and session. Wait for a host decision on disputed equipment. If asked to switch, safely pull over and choose an approved alternative.",
+    "Booster Vehicles": "**Confirm eligibility**\nBefore spawning a booster vehicle, confirm your booster role and ask the host which models are available for this session. A vehicle purchased in Roblox can still have a server-side restriction.\n\n**Use the approved setup**\nKeep the model, livery, and equipment consistent with the approval. Department markings and emergency equipment require separate department authorization.\n\n**Drive for the scene**\nUse roads, speeds, and parking appropriate to the scenario. Give emergency scenes room and roleplay collisions or damage just as you would in any other vehicle.\n\n**When access changes**\nIf your booster role disappears or a host updates the list, switch vehicles at a safe stopping point. For an access check, send General Support your Roblox username and the vehicle name.",
+    "Graphical Guidelines": "**Department identity**\nUse the current department-approved liveries, uniform templates, and unit identifiers while on duty. Keep rank markings consistent with the role you are authorized to play.\n\n**Legibility**\nCheck text and unit numbers at ordinary in-game viewing distance. Use enough contrast for other players to identify the vehicle or uniform during a moving scene.\n\n**Custom designs**\nBefore using a custom design in an official role, send the host or department lead a preview showing the front, sides, and back. Include the vehicle model or uniform type.\n\n**Respect creators**\nUse artwork you own or have permission to use. Avoid impersonating another unit, copying private designs, or displaying offensive material. If staff request a correction, use the approved default until the revision is cleared.",
 }
 NOTIFICATIONS = ("Session", "Event", "Staff", "Giveaway", "News")
 SUPPORT_TYPES = {"general": "General Support", "high": "High Rank Support"}
@@ -56,7 +56,9 @@ class RulesMenu(ui.Select):
 
     async def callback(self, interaction):
         title = self.values[0]
-        await interaction.response.send_message(f"**{BRAND} • {title}**\n{RULES[title]}", ephemeral=True)
+        embed = discord.Embed(title=title, description=RULES[title], color=0x1066EC)
+        embed.set_footer(text=BRAND)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 class RoleMenu(ui.Select):
@@ -98,7 +100,7 @@ class Panel(ui.LayoutView):
     def __init__(self, kind, guild_id, channel_id, desk_id, intake):
         super().__init__(timeout=None)
         self.guild_id, self.channel_id = guild_id, channel_id
-        parts = [gallery(f"{kind}.jpg", f"{BRAND} {kind}"), ui.Separator()]
+        parts = [gallery(f"{kind}.png", f"{BRAND} {kind}"), ui.Separator()]
         if kind == "assistance":
             parts.extend([
                 ui.TextDisplay("**✉️ River City Roleplay Assistance**\nNeed help in the city? Choose a support type below to open a private ticket.\n\n**General Support** handles server questions, player reports, and help with sessions.\n**High Rank Support** goes directly to management for staff concerns or sensitive issues.\n\nTell us what happened and who was involved so the right team can help."),

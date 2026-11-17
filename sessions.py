@@ -1,0 +1,238 @@
+"""River City ER:LC session announcements and member voting."""
+import asyncio
+import logging
+import os
+import re
+import time
+
+import aiohttp
+import discord
+from discord import ui
+from discord.ext import commands
+
+from panels import ASSETS, gallery
+
+CODE = "VCRPRC"
+JOIN = f"https://policeroleplay.community/join/{CODE}"
+BANNERS = {"ssu": "SSU.png", "ssd": "SSD.png", "ssv": "SESSION VOTE.png", "info": "SESSION INFO.png"}
+lock = asyncio.Lock()
+stats_lock = asyncio.Lock()
+stats_cache = (0, "")
+log = logging.getLogger("rivercity.sessions")
+
+
+def emoji(guild, names, fallback):
+    if guild:
+        for name in names:
+            for item in guild.emojis:
+                if item.available and item.name.casefold() == name:
+                    return item
+    return fallback
+
+
+def welcome(member, dashboard):
+    icon = emoji(member.guild, ("welcome", "palm", "palmtree", "rivercity"), "🌴")
+    view = ui.LayoutView(timeout=None)
+    count = member.guild.member_count
+    row = ui.ActionRow(ui.Button(label=f"Members: {count:,}" if count is not None else "Members", disabled=True),
+                       ui.Button(label="Dashboard", emoji=emoji(member.guild, ("dashboard", "clipboard"), "📋"),
+                                 url=f"https://discord.com/channels/{member.guild.id}/{dashboard}"))
+    view.add_item(ui.Container(ui.TextDisplay(f"{icon} Welcome {member.mention} to **River City Roleplay**! We hope you enjoy your stay."), row))
+    return view
+
+
+def format_stats(data):
+    players = data.get("Players")
+    queue = data.get("Queue")
+    staff = "Unavailable"
+    if isinstance(players, list):
+        staff = sum(p.get("Permission") in {"Server Administrator", "Server Moderator", "Server Owner", "Server Co-Owner"} for p in players)
+    count, capacity = data.get("CurrentPlayers"), data.get("MaxPlayers")
+    online = f"{count}/{capacity}" if isinstance(count, int) and isinstance(capacity, int) else "Unavailable"
+    waiting = len(queue) if isinstance(queue, list) else "Unavailable"
+    return f"**Players**   {online}\n**Queue**   {waiting}\n**Staff in game**   {staff}\n-# Checked <t:{int(time.time())}:R> • ER:LC"
+
+
+async def stats():
+    global stats_cache
+    async with stats_lock:
+        if time.monotonic() < stats_cache[0]:
+            return stats_cache[1]
+        wait = 30
+        result = "Live counts are temporarily unavailable. You can still join with the code below."
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=8)) as client:
+                async with client.get("https://api.erlc.gg/v2/server", params={"Players": "true", "Queue": "true"},
+                                      headers={"Server-Key": os.environ["ERLC_SERVER_KEY"]}, allow_redirects=False) as response:
+                    if response.status == 200:
+                        result = format_stats(await response.json())
+                    else:
+                        log.warning("ER:LC status returned HTTP %s", response.status)
+                        if response.status == 429:
+                            wait = max(wait, float(response.headers.get("Retry-After", 60)))
+        except (aiohttp.ClientError, TimeoutError, ValueError, KeyError, TypeError):
+            log.warning("ER:LC status could not be read")
+        stats_cache = time.monotonic() + wait, result
+        return result
+
+
+def components(message):
+    return ui.LayoutView.from_message(message).walk_children()
+
+
+def kind_of(message):
+    for item in components(message):
+        ident = getattr(item, "custom_id", "") or ""
+        if ident in ("rc:session:ssv", "rc:session:ssu", "rc:session:ssd"):
+            return ident.rsplit(":", 1)[1]
+    return None
+
+
+def voters(message):
+    for item in components(message):
+        if isinstance(item, ui.TextDisplay) and item.content.startswith("**Voters"):
+            return [int(n) for n in re.findall(r"<@(\d+)>", item.content)]
+    return []
+
+
+async def latest(channel, bot_id):
+    async for message in channel.history(limit=None):
+        if message.author.id == bot_id and message.components and kind_of(message):
+            return message
+    return None
+
+
+class Vote(ui.Button):
+    def __init__(self, guild=None):
+        super().__init__(label="Vote / Withdraw", emoji=emoji(guild, ("vote", "checkmark", "check"), "✅"),
+                         style=discord.ButtonStyle.primary, custom_id="rc:session:ssv")
+
+    async def callback(self, interaction):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        async with lock:
+            message = await latest(interaction.channel, interaction.client.user.id)
+            if not message or message.id != interaction.message.id:
+                await interaction.followup.send("This vote has ended.", ephemeral=True)
+                return
+            ids = voters(message)
+            uid = interaction.user.id
+            if uid in ids:
+                ids.remove(uid)
+                reply = "Your vote was withdrawn."
+            elif len(ids) >= 100:
+                await interaction.followup.send("This vote has reached 100 members.", ephemeral=True)
+                return
+            else:
+                ids.append(uid)
+                reply = "Your vote is counted. You’ll be mentioned when this session starts."
+            await message.edit(view=session_card("ssv", interaction.guild, ids=ids), allowed_mentions=discord.AllowedMentions.none())
+        await interaction.followup.send(reply, ephemeral=True)
+
+
+class Refresh(ui.Button):
+    def __init__(self, guild=None):
+        super().__init__(label="Refresh", emoji=emoji(guild, ("refresh",), "🔄"), custom_id="rc:session:refresh")
+
+    async def callback(self, interaction):
+        await interaction.response.defer()
+        await interaction.edit_original_response(view=session_card("info", interaction.guild, numbers=await stats()))
+
+
+def session_card(kind, guild, *, ids=(), numbers="", dashboard=None, mentions=""):
+    view = ui.LayoutView(timeout=None)
+    titles = {"ssv": "Session Vote", "ssu": "Session Startup", "ssd": "Session Shutdown", "info": "Session Information"}
+    parts = [gallery("banner.png", titles[kind]), ui.Separator()]
+    if mentions:
+        parts.append(ui.TextDisplay(mentions))
+    icon = emoji(guild, ("erlc", "session", "controller"), "🎮")
+    parts.append(ui.TextDisplay(f"### {icon} {titles[kind]}"))
+    join = ui.Button(label="Join Server", emoji=icon, url=JOIN)
+    if kind == "ssv":
+        parts.extend([ui.TextDisplay("Can you join the next River City session? Cast your vote below. Select the button again to withdraw before startup."),
+                      ui.TextDisplay(f"**Voters ({len(ids)})**\n" + (" ".join(f"<@{n}>" for n in ids) or "Be the first to vote.")),
+                      ui.ActionRow(Vote(guild))])
+    elif kind == "ssu":
+        parts.extend([ui.TextDisplay(f"The city is open! Review the in-game regulations in <#{dashboard}>, then join with code **{CODE}**. If you voted, please join when you can."),
+                      ui.ActionRow(join, ui.Button(label="Session open", disabled=True, custom_id="rc:session:ssu"))])
+    elif kind == "ssd":
+        parts.extend([ui.TextDisplay("Today’s session has concluded. Thank you to the civilians, departments, and staff who brought River City to life. Watch this channel for the next vote."),
+                      ui.ActionRow(ui.Button(label="Session closed", custom_id="rc:session:ssd", disabled=True))])
+    else:
+        parts.extend([ui.TextDisplay(f"Welcome to River City Roleplay. Use **{CODE}** to join the private server. Refresh for the latest in-game counts."),
+                      ui.Separator(), ui.TextDisplay(numbers), ui.ActionRow(join, Refresh(guild))])
+    parts.extend([ui.Separator(), gallery("footer.png", "River City Roleplay")])
+    view.add_item(ui.Container(*parts))
+    return view
+
+
+async def publish(ctx, kind, **kwargs):
+    files = [discord.File(ASSETS / BANNERS[kind], filename="banner.png"), discord.File(ASSETS / "footer.png")]
+    try:
+        return await ctx.send(view=session_card(kind, ctx.guild, **kwargs), files=files,
+                              allowed_mentions=discord.AllowedMentions.none())
+    finally:
+        for file in files:
+            file.close()
+
+
+def host():
+    async def allowed(ctx):
+        role_id = int(os.getenv("SESSION_HOST_ROLE_ID") or 0)
+        return ctx.author.guild_permissions.manage_guild or (role_id and ctx.author.get_role(role_id))
+    return commands.check(allowed)
+
+
+class Sessions(commands.Cog):
+    def __init__(self, dashboard):
+        self.dashboard = dashboard
+
+    @commands.command()
+    @host()
+    async def ssv(self, ctx):
+        async with lock:
+            previous = await latest(ctx.channel, ctx.bot.user.id)
+            if previous and kind_of(previous) == "ssv":
+                await ctx.send(f"The open session vote is here: {previous.jump_url}")
+                return
+            await publish(ctx, "ssv")
+
+    @commands.command()
+    @host()
+    async def ssu(self, ctx):
+        async with lock:
+            previous = await latest(ctx.channel, ctx.bot.user.id)
+            if previous and kind_of(previous) == "ssu":
+                await ctx.send(f"The current startup is here: {previous.jump_url}")
+                return
+            ids = voters(previous) if previous and kind_of(previous) == "ssv" else []
+            configured = os.getenv("COMMUNITY_MEMBER_ROLE_ID", "")
+            role = ctx.guild.get_role(int(configured)) if configured.isdecimal() else next(
+                (r for r in ctx.guild.roles if re.sub("[^a-z]", "", r.name.casefold()) in {"communitymember", "communitymembers"}), None)
+            if role and role.is_default():
+                role = None
+            names = ([role.mention] if role else []) + [f"<@{n}>" for n in ids]
+            files = [discord.File(ASSETS / BANNERS["ssu"], filename="banner.png"), discord.File(ASSETS / "footer.png")]
+            try:
+                await ctx.send(view=session_card("ssu", ctx.guild, dashboard=self.dashboard, mentions=" ".join(names)), files=files,
+                               allowed_mentions=discord.AllowedMentions(everyone=False, roles=[role] if role else False,
+                                                                        users=[discord.Object(id=n) for n in ids], replied_user=False))
+            finally:
+                for file in files:
+                    file.close()
+            if not role:
+                await ctx.send("Startup posted. Set COMMUNITY_MEMBER_ROLE_ID to enable the community role ping.")
+
+    @commands.command()
+    @host()
+    async def ssd(self, ctx):
+        async with lock:
+            previous = await latest(ctx.channel, ctx.bot.user.id)
+            if previous and kind_of(previous) == "ssd":
+                await ctx.send(f"The shutdown is already posted: {previous.jump_url}")
+                return
+            await publish(ctx, "ssd")
+
+    @commands.command()
+    @commands.cooldown(1, 10, commands.BucketType.user)
+    async def serverinfo(self, ctx):
+        await publish(ctx, "info", numbers=await stats())

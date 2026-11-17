@@ -10,6 +10,7 @@ from discord.ext import commands
 from dotenv import load_dotenv
 
 from panels import ASSETS, Panel, SUPPORT_TYPES
+from sessions import Sessions, session_card, stats, welcome
 
 load_dotenv(Path(__file__).with_name(".env"))
 
@@ -34,6 +35,9 @@ def card(title, description):
 
 class RiverBot(commands.Bot):
     async def setup_hook(self):
+        await self.add_cog(Sessions(DASHBOARD))
+        self.add_view(session_card("ssv", None))
+        self.add_view(session_card("info", None, numbers="Loading counts…"))
         self.add_view(build_panel(PANEL))
         self.add_view(build_panel(DASHBOARD))
         self.add_view(Controls())
@@ -56,9 +60,7 @@ async def on_member_join(member):
         return
     channel = member.guild.get_channel(WELCOME)
     if channel:
-        embed = card("Welcome to River City Roleplay!", f"{member.mention}, welcome to the city! Read the server rules and introduce yourself. If you need staff assistance, visit <#{PANEL}>.")
-        embed.set_thumbnail(url=member.display_avatar.url)
-        await channel.send(member.mention, embed=embed, allowed_mentions=discord.AllowedMentions(users=[member]))
+        await channel.send(view=welcome(member, DASHBOARD), allowed_mentions=discord.AllowedMentions(users=[member]))
 
 
 def support_role(guild):
@@ -216,7 +218,8 @@ async def ensure_panel(channel):
             if any(getattr(item, "custom_id", None) in markers for item in view.walk_children()):
                 previous = message
                 break
-        files = [discord.File(ASSETS / name) for name in (f"{kind}.jpg", "footer.png")]
+        banner = "Dashboard (2).PNG" if kind == "dashboard" else "Assistance.png"
+        files = [discord.File(ASSETS / banner, filename=f"{kind}.png"), discord.File(ASSETS / "footer.png")]
         try:
             if previous:
                 return await previous.edit(content=None, embeds=[], attachments=files, view=build_panel(channel.id))
@@ -229,6 +232,9 @@ async def ensure_panel(channel):
 @bot.event
 async def on_ready():
     guild = bot.get_guild(GUILD)
+    if guild and os.getenv("ERLC_SERVER_KEY"):
+        snapshot = await stats()
+        log.info("ER:LC live counts available: %s", snapshot.startswith("**Players**"))
     if guild and guild.me.display_name != "River City Roleplay":
         try:
             await guild.me.edit(nick="River City Roleplay")
@@ -325,7 +331,8 @@ async def clear(ctx, amount: commands.Range[int, 1, 100]):
 
 @bot.command(name="cmds", aliases=["help", "commands"])
 async def show_help(ctx):
-    await ctx.send(embed=card("River City Roleplay", f"**Command list** · `.cmds`, `.commands`, `.help`\n**Member assistance** · <#{PANEL}>\n\n**Staff commands**\n`.kick @member [reason]`\n`.ban @member [reason]`\n`.unban user_id [reason]`\n`.timeout @member minutes [reason]`\n`.untimeout @member [reason]`\n`.clear 1–100`\n`.ticketpanel`\n`.dashboard`"))
+    session_help = "**Sessions**\n`.ssv` vote · `.ssu` startup · `.ssd` shutdown\n`.serverinfo` live ER:LC counts"
+    await ctx.send(embed=card("River City Roleplay", f"{session_help}\n\n**Command list** · `.cmds`, `.commands`, `.help`\n**Member assistance** · <#{PANEL}>\n\n**Staff commands**\n`.kick @member [reason]`\n`.ban @member [reason]`\n`.unban user_id [reason]`\n`.timeout @member minutes [reason]`\n`.untimeout @member [reason]`\n`.clear 1–100`\n`.ticketpanel`\n`.dashboard`"))
 
 
 @bot.event
@@ -334,6 +341,10 @@ async def on_command_error(ctx, error):
         return
     if isinstance(error, commands.MissingPermissions):
         message = "You don’t have permission to use that command."
+    elif isinstance(error, commands.CheckFailure):
+        message = "This command requires Manage Server or the configured Session Host role."
+    elif isinstance(error, commands.CommandOnCooldown):
+        message = f"Try again in {error.retry_after:.0f} seconds."
     elif isinstance(error, commands.UserInputError):
         message = f"{error}\nUsage: `.{ctx.command} {ctx.command.signature}`"
     else:
