@@ -129,11 +129,27 @@ class Vote(ui.Button):
         await interaction.followup.send(reply, ephemeral=True)
 
 
+def has_staff_role(member):
+    guild = getattr(member, "guild", None)
+    if guild is None:
+        return False
+    configured = os.getenv("STAFF_ROLE_ID", "").strip()
+    if configured:
+        role = guild.get_role(int(configured)) if configured.isdecimal() else None
+    else:
+        matches = [r for r in guild.roles if r.name.strip().casefold() == "staff"]
+        role = matches[0] if len(matches) == 1 else None
+    return role is not None and not role.is_default() and member.get_role(role.id) is not None
+
+
 class Refresh(ui.Button):
     def __init__(self, guild=None):
         super().__init__(label="Refresh", emoji=emoji(guild, ("refresh",), "🔄"), custom_id="rc:session:refresh")
 
     async def callback(self, interaction):
+        if not has_staff_role(interaction.user):
+            await interaction.response.send_message("Only members with the Staff role can refresh server info.", ephemeral=True)
+            return
         await interaction.response.defer()
         await interaction.edit_original_response(view=session_card("info", interaction.guild, numbers=await stats()))
 
@@ -235,4 +251,7 @@ class Sessions(commands.Cog):
     @commands.command()
     @commands.cooldown(1, 10, commands.BucketType.user)
     async def serverinfo(self, ctx):
+        if not has_staff_role(ctx.author):
+            await ctx.send("Only members with the Staff role can use .serverinfo.")
+            return
         await publish(ctx, "info", numbers=await stats())
