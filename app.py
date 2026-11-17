@@ -5,6 +5,7 @@ from datetime import timedelta
 from pathlib import Path
 
 import discord
+from aiohttp import web
 from discord.ext import commands
 from dotenv import load_dotenv
 
@@ -155,7 +156,8 @@ async def create_ticket(interaction, route, subject, details):
             try:
                 if use_thread:
                     await room.add_user(member)
-                embed = card(SUPPORT_TYPES[route], f"**Requester**  {member.mention}\n**Subject**  {discord.utils.escape_markdown(subject)}\n\n{details}")
+                team = "management" if high else "the support team"
+                embed = card(SUPPORT_TYPES[route], f"{member.mention}, your request is open for {team} to review. Add any relevant screenshots or message links here. A staff member can claim the ticket below.\n\n**Subject**  {discord.utils.escape_markdown(subject)}\n\n{details}")
                 ping = role.mention if role and not use_thread else ""
                 await room.send(ping or None, embed=embed, view=Controls(),
                                 allowed_mentions=discord.AllowedMentions(roles=[role]) if ping else discord.AllowedMentions.none())
@@ -341,9 +343,31 @@ async def on_command_error(ctx, error):
     await ctx.send(message)
 
 
+async def health(request):
+    ready = bot.is_ready()
+    return web.Response(text="ready" if ready else "connecting", status=200 if ready else 503)
+
+
+async def run_hosted(token, port):
+    application = web.Application()
+    application.router.add_get("/", health)
+    application.router.add_get("/health", health)
+    runner = web.AppRunner(application)
+    await runner.setup()
+    try:
+        await web.TCPSite(runner, "0.0.0.0", port).start()
+        async with bot:
+            await bot.start(token)
+    finally:
+        await runner.cleanup()
+
+
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     token = os.getenv("DISCORD_TOKEN")
     if not token:
         raise SystemExit("Set DISCORD_TOKEN in .env or the host environment before starting the bot.")
-    bot.run(token)
+    if os.getenv("PORT") or os.getenv("RENDER_SERVICE_TYPE") in {"pserv", "web", "private_service", "web_service"}:
+        asyncio.run(run_hosted(token, int(os.getenv("PORT") or 10000)))
+    else:
+        bot.run(token)
