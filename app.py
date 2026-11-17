@@ -8,6 +8,8 @@ import discord
 from discord.ext import commands
 from dotenv import load_dotenv
 
+from panels import ASSETS, Panel, SUPPORT_TYPES
+
 load_dotenv(Path(__file__).with_name(".env"))
 
 GUILD = 1491365342646112386
@@ -15,7 +17,9 @@ WELCOME = 1572082493715386398
 DEST = 1572082450232774727
 PANEL = 1572082489743249591
 SUPPORT = int(os.getenv("SUPPORT_ROLE_ID") or 0)
-BLUE = 0x4285BA
+DASHBOARD = 1492006832779165756
+HIGH_RANK = int(os.getenv("HIGH_RANK_ROLE_ID") or 1572082345949790311)
+BLUE = 0x1066EC
 ticket_lock = asyncio.Lock()
 panel_lock = asyncio.Lock()
 log = logging.getLogger("rivercity")
@@ -29,7 +33,8 @@ def card(title, description):
 
 class RiverBot(commands.Bot):
     async def setup_hook(self):
-        self.add_view(Panel())
+        self.add_view(build_panel(PANEL))
+        self.add_view(build_panel(DASHBOARD))
         self.add_view(Controls())
 
     async def process_commands(self, message):
@@ -63,6 +68,9 @@ def support_role(guild):
 
 
 def ticket_owner(channel):
+    if high_ticket(channel):
+        value = channel.topic.rsplit("=", 1)[-1]
+        return int(value) if value.isdecimal() else None
     if isinstance(channel, discord.TextChannel) and channel.category_id == DEST:
         prefix = "River City assistance | owner="
         value = (channel.topic or "").removeprefix(prefix)
@@ -75,6 +83,8 @@ def ticket_owner(channel):
 
 
 def is_staff(member, channel):
+    if high_ticket(channel):
+        return member.guild_permissions.administrator or bool(HIGH_RANK and member.get_role(HIGH_RANK))
     if member.guild_permissions.administrator or (SUPPORT and member.get_role(SUPPORT)):
         return True
     perms = channel.permissions_for(member)
@@ -97,50 +107,66 @@ class TicketView(discord.ui.View):
             await interaction.response.send_message(message, ephemeral=True)
 
 
-class Panel(TicketView):
-    @discord.ui.button(label="Request Assistance", style=discord.ButtonStyle.primary, custom_id="rc:open")
-    async def open_ticket(self, interaction, button):
-        if interaction.channel_id != PANEL:
-            return
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        guild, member = interaction.guild, interaction.user
-        dest = guild.get_channel(DEST)
-        role = support_role(guild)
+def high_ticket(channel):
+    return isinstance(channel, discord.TextChannel) and (channel.topic or "").startswith("River City Roleplay | management | owner=")
+
+
+async def create_ticket(interaction, route, subject, details):
+    if interaction.guild_id != GUILD or interaction.channel_id != PANEL:
+        return
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    guild, member = interaction.guild, interaction.user
+    high = route == "high"
+    dest = guild.get_channel(DEST)
+    try:
+        if not isinstance(dest, (discord.TextChannel, discord.CategoryChannel)):
+            raise ValueError("The configured ticket destination is unavailable.")
+        if high:
+            role = guild.get_role(HIGH_RANK)
+            if HIGH_RANK and (not role or role.is_default()):
+                raise ValueError("Management role setup needs staff attention.")
+        else:
+            role = support_role(guild)
         async with ticket_lock:
-            if isinstance(dest, discord.CategoryChannel):
-                rooms = await guild.fetch_channels()
-            elif isinstance(dest, discord.TextChannel):
-                if not dest.permissions_for(member).view_channel:
-                    raise ValueError("You need access to the assistance parent channel. Please contact staff.")
-                rooms = await guild.active_threads()
-            else:
-                raise ValueError("Staff must configure a ticket category or text channel.")
-            existing = next((room for room in rooms if ticket_owner(room) == member.id), None)
+            use_thread = not high and isinstance(dest, discord.TextChannel)
+            rooms = await guild.active_threads() if use_thread else await guild.fetch_channels()
+            existing = next((r for r in rooms if high_ticket(r) == high and ticket_owner(r) == member.id), None)
             if existing:
-                await interaction.followup.send(f"Your ticket is already open in {existing.mention}.", ephemeral=True)
+                await interaction.followup.send(f"You already have an open {SUPPORT_TYPES[route]} ticket: {existing.mention}", ephemeral=True)
                 return
-            name = f"assistance-{member.id}"
-            if isinstance(dest, discord.CategoryChannel):
+            if use_thread:
+                if not dest.permissions_for(member).view_channel or not dest.permissions_for(member).send_messages_in_threads:
+                    raise ValueError("Ask staff for permission to use the assistance parent channel.")
+                room = await dest.create_thread(name=f"assistance-{member.id}", type=discord.ChannelType.private_thread, invitable=False)
+            else:
+                category = dest if isinstance(dest, discord.CategoryChannel) else dest.category
                 access = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
                 overwrites = {guild.default_role: discord.PermissionOverwrite(view_channel=False),
                               member: access, guild.me: discord.PermissionOverwrite(view_channel=True, manage_channels=True, send_messages=True, read_message_history=True)}
                 if role:
                     overwrites[role] = access
-                else:
+                elif not high:
                     for staff_role in guild.roles:
                         if not staff_role.is_default() and staff_role.permissions.manage_channels:
                             overwrites[staff_role] = access
-                room = await guild.create_text_channel(name, category=dest, overwrites=overwrites, topic=f"River City assistance | owner={member.id}")
-            else:
-                room = await dest.create_thread(name=name, type=discord.ChannelType.private_thread, invitable=False)
+                prefix = "management" if high else "assistance"
+                topic = "River City Roleplay | management | owner=" if high else "River City assistance | owner="
+                room = await guild.create_text_channel(f"{prefix}-{member.id}", category=category, overwrites=overwrites, topic=f"{topic}{member.id}")
             try:
-                if isinstance(room, discord.Thread):
+                if use_thread:
                     await room.add_user(member)
-                await room.send(member.mention, embed=card("Assistance ticket", "Describe what happened and what you need help with. A staff member can claim this ticket below."), view=Controls())
+                embed = card(SUPPORT_TYPES[route], f"**Requester**  {member.mention}\n**Subject**  {discord.utils.escape_markdown(subject)}\n\n{details}")
+                ping = role.mention if role and not use_thread else ""
+                await room.send(ping or None, embed=embed, view=Controls(),
+                                allowed_mentions=discord.AllowedMentions(roles=[role]) if ping else discord.AllowedMentions.none())
             except discord.HTTPException:
                 await room.delete(reason="Incomplete ticket setup")
                 raise
-        await interaction.followup.send(f"Your private ticket is ready in {room.mention}.", ephemeral=True)
+        await interaction.followup.send(f"Your {SUPPORT_TYPES[route]} ticket is ready: {room.mention}", ephemeral=True)
+    except (discord.HTTPException, ValueError) as error:
+        log.exception("Could not create ticket")
+        message = str(error) if isinstance(error, ValueError) else "Staff must check the bot’s channel and role permissions."
+        await interaction.followup.send(message, ephemeral=True)
 
 
 class Controls(TicketView):
@@ -171,22 +197,60 @@ class Controls(TicketView):
         await interaction.channel.delete(reason=f"Ticket closed by {interaction.user.id}")
 
 
+def build_panel(channel_id):
+    kind = "dashboard" if channel_id == DASHBOARD else "assistance"
+    return Panel(kind, GUILD, channel_id, PANEL, create_ticket)
+
+
 async def ensure_panel(channel):
+    kind = "dashboard" if channel.id == DASHBOARD else "assistance"
+    markers = {"rc:rules:v2"} if kind == "dashboard" else {"rc:desk:v2", "rc:open"}
     async with panel_lock:
+        previous = None
         async for message in channel.history(limit=None):
-            if message.author == bot.user and any(getattr(button, "custom_id", None) == "rc:open" for row in message.components for button in row.children):
-                return message
-        return await channel.send(embed=card("River City Assistance", "Need help from staff? Select **Request Assistance** to open a private ticket."), view=Panel())
+            if message.author != bot.user:
+                continue
+            view = discord.ui.LayoutView.from_message(message)
+            if any(getattr(item, "custom_id", None) in markers for item in view.walk_children()):
+                previous = message
+                break
+        files = [discord.File(ASSETS / name) for name in (f"{kind}.jpg", "footer.png")]
+        try:
+            if previous:
+                return await previous.edit(content=None, embeds=[], attachments=files, view=build_panel(channel.id))
+            return await channel.send(files=files, view=build_panel(channel.id))
+        finally:
+            for file in files:
+                file.close()
 
 
 @bot.event
 async def on_ready():
     guild = bot.get_guild(GUILD)
-    channel = guild and guild.get_channel(PANEL)
-    if channel:
-        await ensure_panel(channel)
-    else:
-        log.error("Configured server or panel channel is unavailable")
+    if guild and guild.me.display_name != "River City Roleplay":
+        try:
+            await guild.me.edit(nick="River City Roleplay")
+        except discord.HTTPException:
+            log.warning("Could not set the bot nickname to River City Roleplay")
+    for ident in (DASHBOARD, PANEL):
+        channel = guild and guild.get_channel(ident)
+        if not channel:
+            log.error("Panel channel %s is unavailable", ident)
+            continue
+        try:
+            await ensure_panel(channel)
+        except discord.HTTPException:
+            log.exception("Could not publish panel in %s", ident)
+
+
+@bot.command()
+@commands.has_guild_permissions(manage_guild=True)
+async def dashboard(ctx):
+    channel = ctx.guild.get_channel(DASHBOARD)
+    if not channel:
+        raise commands.BadArgument("The dashboard channel is unavailable.")
+    message = await ensure_panel(channel)
+    await ctx.send(f"Dashboard: {message.jump_url}")
 
 
 @bot.command()
@@ -257,9 +321,9 @@ async def clear(ctx, amount: commands.Range[int, 1, 100]):
     await ctx.send(f"Cleared {len(deleted)} messages.", delete_after=5)
 
 
-@bot.command(name="help")
+@bot.command(name="cmds", aliases=["help", "commands"])
 async def show_help(ctx):
-    await ctx.send(embed=card("River City Systems", f"**Member assistance** · <#{PANEL}>\n\n**Staff commands**\n`.kick @member [reason]`\n`.ban @member [reason]`\n`.unban user_id [reason]`\n`.timeout @member minutes [reason]`\n`.untimeout @member [reason]`\n`.clear 1–100`\n`.ticketpanel`"))
+    await ctx.send(embed=card("River City Roleplay", f"**Command list** · `.cmds`, `.commands`, `.help`\n**Member assistance** · <#{PANEL}>\n\n**Staff commands**\n`.kick @member [reason]`\n`.ban @member [reason]`\n`.unban user_id [reason]`\n`.timeout @member minutes [reason]`\n`.untimeout @member [reason]`\n`.clear 1–100`\n`.ticketpanel`\n`.dashboard`"))
 
 
 @bot.event
