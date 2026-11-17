@@ -30,6 +30,14 @@ def emoji(guild, names, fallback):
     return fallback
 
 
+def community_role(guild):
+    configured = os.getenv("COMMUNITY_MEMBER_ROLE_ID", "").strip()
+    if configured:
+        return guild.get_role(int(configured)) if configured.isdecimal() else None
+    matches = [r for r in guild.roles if re.sub("[^a-z]", "", r.name.casefold()) in {"communitymember", "communitymembers"}]
+    return matches[0] if len(matches) == 1 else None
+
+
 def welcome(member, dashboard):
     icon = emoji(member.guild, ("welcome", "palm", "palmtree", "rivercity"), "🌴")
     view = ui.LayoutView(timeout=None)
@@ -221,9 +229,7 @@ class Sessions(commands.Cog):
                 await ctx.send(f"The current startup is here: {previous.jump_url}")
                 return
             ids = voters(previous) if previous and kind_of(previous) == "ssv" else []
-            configured = os.getenv("COMMUNITY_MEMBER_ROLE_ID", "")
-            role = ctx.guild.get_role(int(configured)) if configured.isdecimal() else next(
-                (r for r in ctx.guild.roles if re.sub("[^a-z]", "", r.name.casefold()) in {"communitymember", "communitymembers"}), None)
+            role = community_role(ctx.guild)
             if role and role.is_default():
                 role = None
             names = ([role.mention] if role else []) + [f"<@{n}>" for n in ids]

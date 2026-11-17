@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import secrets
 from datetime import timedelta
 from pathlib import Path
 
@@ -10,7 +11,7 @@ from discord.ext import commands
 from dotenv import load_dotenv
 
 from panels import ASSETS, Panel, SUPPORT_TYPES
-from sessions import Sessions, session_card, stats, welcome
+from sessions import Sessions, community_role, session_card, stats, welcome
 
 load_dotenv(Path(__file__).with_name(".env"))
 
@@ -34,6 +35,29 @@ def card(title, description):
 
 
 class RiverBot(commands.Bot):
+    receipt_channel_id = None
+
+    async def receipt_channel(self, guild):
+        cached = guild.get_channel(self.receipt_channel_id) if self.receipt_channel_id else None
+        if cached:
+            return cached
+        async with panel_lock:
+            marker = f"River City Roleplay command receipts • {self.user.id}"
+            rooms = await guild.fetch_channels()
+            candidates = [c for c in rooms if isinstance(c, discord.TextChannel) and c.topic == marker]
+            if not candidates:
+                await guild.create_text_channel(
+                    "river-city-command-receipts", topic=marker,
+                    overwrites={guild.default_role: discord.PermissionOverwrite(view_channel=False),
+                                guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)},
+                    reason="Coordinate command execution across bot connections",
+                )
+                rooms = await guild.fetch_channels()
+                candidates = [c for c in rooms if isinstance(c, discord.TextChannel) and c.topic == marker]
+            room = min(candidates, key=lambda c: c.id)
+            self.receipt_channel_id = room.id
+            return room
+
     async def setup_hook(self):
         await self.add_cog(Sessions(DASHBOARD))
         self.add_view(session_card("ssv", None))
@@ -43,8 +67,23 @@ class RiverBot(commands.Bot):
         self.add_view(Controls())
 
     async def process_commands(self, message):
-        if message.guild and message.guild.id == GUILD:
-            await super().process_commands(message)
+        if message.author.bot or not message.guild or message.guild.id != GUILD or not message.content.startswith("."):
+            return
+        ctx = await self.get_context(message)
+        if not ctx.command:
+            return
+        # Discord returns the existing message for a recently used enforced nonce.
+        # Only the caller whose random marker was stored may execute the command.
+        marker = secrets.token_hex(16)
+        try:
+            room = await self.receipt_channel(message.guild)
+            receipt = await room.send(marker, nonce=str(message.id), silent=True, delete_after=180)
+        except discord.HTTPException:
+            log.exception("Could not claim command %s", message.id)
+            await message.channel.send("I need access to the private command receipts channel. Staff should check my Manage Channels and Send Messages permissions.", nonce=f"err{message.id}")
+            return
+        if receipt.content == marker:
+            await self.invoke(ctx)
 
 
 intents = discord.Intents.default()
@@ -58,6 +97,14 @@ bot = RiverBot(command_prefix=".", intents=intents,
 async def on_member_join(member):
     if member.guild.id != GUILD or member.bot:
         return
+    role = community_role(member.guild)
+    if role and role.is_assignable() and not role.permissions.administrator:
+        try:
+            await member.add_roles(role, reason="River City Roleplay community member joined")
+        except discord.HTTPException:
+            log.exception("Could not assign Community Member on join")
+    else:
+        log.warning("Community Member role is missing, ambiguous, or unassignable")
     channel = member.guild.get_channel(WELCOME)
     if channel:
         await channel.send(view=welcome(member, DASHBOARD), allowed_mentions=discord.AllowedMentions(users=[member]))
@@ -232,6 +279,15 @@ async def ensure_panel(channel):
 @bot.event
 async def on_ready():
     guild = bot.get_guild(GUILD)
+    if guild:
+        try:
+            room = await bot.receipt_channel(guild)
+            log.info("Command receipts ready in %s", room.id)
+        except discord.HTTPException:
+            log.exception("Command receipt channel initialization failed")
+        role = community_role(guild)
+        log.info("Community Member join role: %s; assignable: %s", role.id if role else None,
+                 bool(role and role.is_assignable() and guild.me.guild_permissions.manage_roles and not role.permissions.administrator))
     if guild and os.getenv("ERLC_SERVER_KEY"):
         snapshot = await stats()
         log.info("ER:LC live counts available: %s", snapshot.startswith("**Players**"))
