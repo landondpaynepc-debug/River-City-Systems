@@ -257,8 +257,7 @@ async def dashboard(ctx):
     channel = ctx.guild.get_channel(DASHBOARD)
     if not channel:
         raise commands.BadArgument("The dashboard channel is unavailable.")
-    message = await ensure_panel(channel)
-    await ctx.send(f"Dashboard: {message.jump_url}")
+    await ensure_panel(channel)
 
 
 @bot.command()
@@ -267,8 +266,7 @@ async def ticketpanel(ctx):
     channel = ctx.guild.get_channel(PANEL)
     if not channel:
         raise commands.BadArgument("The panel channel is unavailable.")
-    message = await ensure_panel(channel)
-    await ctx.send(f"Assistance panel: {message.jump_url}")
+    await ensure_panel(channel)
 
 
 def check_target(ctx, member):
