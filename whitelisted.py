@@ -2,7 +2,12 @@
 import discord
 from discord import ui
 
-from panels import ASSETS, gallery
+ASSET_URL = "https://raw.githubusercontent.com/landondpaynepc-debug/River-City-Systems/3b5cd8dc8bfbffa41903a0601de2ac33fd372806/assets"
+
+
+def panel_image(filename, description):
+    item = discord.MediaGalleryItem(f"{ASSET_URL}/{filename}", description=description)
+    return ui.MediaGallery(item)
 
 
 DEPARTMENTS = {
@@ -37,21 +42,10 @@ class DepartmentPanel(ui.LayoutView):
     def __init__(self):
         super().__init__(timeout=None)
         self.add_item(ui.Container(
-            gallery("whitelisted.webp", "River City Roleplay — Whitelisted Departments"),
+            panel_image("whitelisted.webp", "River City Roleplay — Whitelisted Departments"),
             ui.TextDisplay("## River City Departments\n> Select a whitelisted department below to get its Discord invite."),
             ui.ActionRow(DepartmentMenu()),
             ui.Separator(),
-            gallery("footer.png", "River City Roleplay"),
+            panel_image("footer.png", "River City Roleplay"),
             accent_colour=0x176BEA,
         ))
-
-
-async def post_departments(ctx):
-    with (ASSETS / "whitelisted.webp").open("rb") as banner, (ASSETS / "footer.png").open("rb") as footer:
-        await ctx.send(
-            view=DepartmentPanel(),
-            files=[
-                discord.File(banner, filename="whitelisted.webp"),
-                discord.File(footer, filename="footer.png"),
-            ],
-        )
