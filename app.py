@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 from panels import ASSETS, Panel, SUPPORT_TYPES
 from sessions import Sessions, community_role, session_card, stats, welcome
 from verification import Verification, JOIN_ROLE
+from whitelisted import DepartmentPanel, post_departments
 from voice_guard import VoiceGuard
 
 load_dotenv(Path(__file__).with_name(".env"))
@@ -72,6 +73,7 @@ class RiverBot(commands.Bot):
         self.add_view(build_panel(PANEL))
         self.add_view(build_panel(DASHBOARD))
         self.add_view(Controls())
+        self.add_view(DepartmentPanel())
 
     async def process_commands(self, message):
         if message.author.bot or not message.guild or message.guild.id != GUILD or not message.content.startswith("."):
@@ -356,6 +358,12 @@ async def ticketpanel(ctx):
     await ensure_panel(channel)
 
 
+@bot.command()
+@commands.has_guild_permissions(manage_guild=True)
+async def whitelisted(ctx):
+    await post_departments(ctx)
+
+
 def check_target(ctx, member):
     if member in (ctx.author, ctx.guild.me, ctx.guild.owner):
         raise commands.BadArgument("Choose another member below your highest role.")
@@ -417,7 +425,7 @@ async def clear(ctx, amount: commands.Range[int, 1, 100]):
 @bot.command(name="cmds", aliases=["help", "commands"])
 async def show_help(ctx):
     session_help = "**Sessions**\n`.ssv` vote · `.ssu` startup · `.ssd` shutdown\n`.serverinfo` live ER:LC counts"
-    await ctx.send(embed=card("River City Roleplay", f"{session_help}\n\n**Command list** · `.cmds`, `.commands`, `.help`\n**Member assistance** · <#{PANEL}>\n\n**Staff commands**\n`.kick @member [reason]`\n`.ban @member [reason]`\n`.unban user_id [reason]`\n`.timeout @member minutes [reason]`\n`.untimeout @member [reason]`\n`.clear 1–100`\n`.ticketpanel`\n`.dashboard`\n`.verify` - verification panel\n`.verify lock` - configure verified access (Manage Server)"))
+    await ctx.send(embed=card("River City Roleplay", f"{session_help}\n\n**Command list** · `.cmds`, `.commands`, `.help`\n**Member assistance** · <#{PANEL}>\n\n**Staff commands**\n`.kick @member [reason]`\n`.ban @member [reason]`\n`.unban user_id [reason]`\n`.timeout @member minutes [reason]`\n`.untimeout @member [reason]`\n`.clear 1–100`\n`.whitelisted` - department directory\n`.ticketpanel`\n`.dashboard`\n`.verify` - verification panel\n`.verify lock` - configure verified access (Manage Server)"))
 
 
 @bot.event
