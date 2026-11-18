@@ -13,11 +13,11 @@ async def run():
             raise AssertionError('Missing key should block verification')
         except v.VerificationUnavailable:
             pass
-    pending, verified = SimpleNamespace(id=v.JOIN_ROLE), SimpleNamespace(id=v.VERIFIED_ROLE)
+    pending, verified = SimpleNamespace(id=v.JOIN_ROLE,name='Unverified',managed=False,permissions=SimpleNamespace(administrator=False),is_assignable=lambda:True), SimpleNamespace(id=v.VERIFIED_ROLE,name='Community Member')
     member=SimpleNamespace(roles=[pending], add_roles=AsyncMock(), remove_roles=AsyncMock())
     member.add_roles.side_effect = lambda role, **kw: member.roles.append(role)
     member.remove_roles.side_effect = lambda role, **kw: member.roles.remove(role)
-    guild=SimpleNamespace(id=v.GUILD, fetch_member=AsyncMock(return_value=member))
+    guild=SimpleNamespace(id=v.GUILD, roles=[pending,verified], fetch_member=AsyncMock(return_value=member))
     interaction=SimpleNamespace(guild=guild, user=SimpleNamespace(id=42,bot=False),
         response=SimpleNamespace(defer=AsyncMock()), followup=SimpleNamespace(send=AsyncMock()))
     service=SimpleNamespace(busy=set(),cooldowns={},accounts=SimpleNamespace(lookup=AsyncMock(return_value=None)))

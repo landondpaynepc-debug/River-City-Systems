@@ -6,7 +6,7 @@ import verification as v
 async def test():
     role=NS(id=v.JOIN_ROLE,name='Unverified')
     member=NS(id=42,bot=False,roles=[role],get_role=lambda n:role if n==v.JOIN_ROLE else None)
-    guild=NS(id=v.GUILD,members=[member])
+    guild=NS(id=v.GUILD,members=[member],roles=[role])
     service=object.__new__(v.Verification)
     service.bot=NS(is_ready=lambda:True,get_guild=lambda n:guild)
     service.busy=set();service.sync_due={};service.sync_queue=set()
