@@ -3,10 +3,11 @@ import asyncio
 import logging
 import os
 import time
+import re
 
 import aiohttp
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 
 GUILD = 1491365342646112386
 JOIN_ROLE = 1572082428678373436
@@ -70,6 +71,24 @@ def roles_for(guild):
     return pending, verified
 
 
+async def apply_verified_roles(guild, user_id, roblox_id):
+    pending, verified = roles_for(guild)
+    member = await guild.fetch_member(user_id)
+    changed = verified not in member.roles or pending in member.roles
+    # Independent role endpoints preserve unrelated roles during concurrent updates.
+    if verified not in member.roles:
+        await member.add_roles(verified, reason=f'Bloxlink verified Roblox ID {roblox_id}')
+    if pending in member.roles:
+        await member.remove_roles(pending, reason='Bloxlink confirmed Roblox account ownership')
+    saved = await guild.fetch_member(user_id)
+    if pending in saved.roles or verified not in saved.roles:
+        raise VerificationUnavailable('The role update has not completed. Please try again or contact staff.')
+    if changed:
+        log.info('Verification roles repaired: Discord=%s CommunityMember=%s UnverifiedRemoved=%s',
+                 user_id, verified.id, pending.id)
+    return changed
+
+
 class VerificationActions(discord.ui.View):
     def __init__(self, service):
         super().__init__(timeout=None)
@@ -102,16 +121,7 @@ class VerificationActions(discord.ui.View):
                     'No linked account was found. Press **Verify with Roblox**, sign in using this Discord account, '
                     'select **River City Roleplay** and finish linking your Roblox account. Then press **Check Verification**.', ephemeral=True)
                 return
-            member = await interaction.guild.fetch_member(user_id)
-            # Remove the restrictive pending role before granting access. A failed
-            # add leaves the member without access; retry safely completes it.
-            if pending in member.roles:
-                await member.remove_roles(pending, reason='Bloxlink confirmed Roblox account ownership')
-            try:
-                await member.add_roles(verified, reason=f'Bloxlink verified Roblox ID {roblox_id}')
-            except discord.HTTPException:
-                await member.add_roles(pending, reason='Restore pending role after failed verification role assignment')
-                raise
+            await apply_verified_roles(interaction.guild, user_id, roblox_id)
             await interaction.followup.send(
                 f'✅ **You are verified!**\nLinked account: https://www.roblox.com/users/{roblox_id}/profile\n'
                 'Your Community Member role is active. Welcome to River City Roleplay!', ephemeral=True)
@@ -145,7 +155,7 @@ class VerificationView(discord.ui.LayoutView):
                 'Use your current Discord account and select **River City Roleplay**.'),
             discord.ui.Separator(spacing=discord.SeparatorSpacing.small),
             discord.ui.TextDisplay('**02 - Confirm your verification**\nReturn here and press **Check Verification**. '
-                'We confirm your linked account before granting Community Member.'),
+                'Your roles sync automatically after linking. You can also press **Check Verification** to update them now.'),
             discord.ui.Separator(spacing=discord.SeparatorSpacing.small),
             discord.ui.TextDisplay('**03 - Join the community**\nRead the rules and join a session using your linked Roblox account. '
                 'Stay connected to a voice channel while in game.'),
@@ -173,7 +183,58 @@ class Verification(commands.Cog):
         self.panel_lock = asyncio.Lock()
         self.checked_connection = False
         self.upgrade_task = None
+        self.sync_due = {}
+        self.sync_queue = set()
+        self.sync_roles.start()
         bot.add_view(VerificationView(self))
+
+    def cog_unload(self):
+        self.sync_roles.cancel()
+        if self.upgrade_task:
+            self.upgrade_task.cancel()
+
+    @commands.Cog.listener()
+    async def on_member_update(self, before, after):
+        if after.guild.id != GUILD or after.bot or before.roles == after.roles:
+            return
+        if after.get_role(JOIN_ROLE) or not after.get_role(VERIFIED_ROLE):
+            self.sync_queue.add(after.id)
+            self.sync_due[after.id] = 0
+
+    @tasks.loop(seconds=15)
+    async def sync_roles(self):
+        if not self.bot.is_ready() or not os.getenv('BLOXLINK_API_KEY'):
+            return
+        guild = self.bot.get_guild(GUILD)
+        if not guild:
+            return
+        now = time.monotonic()
+        candidates = []
+        for member in guild.members:
+            marker = any(re.sub('[^a-z]', '', role.name.lower()) == 'verified' for role in member.roles)
+            needs_sync = member.get_role(JOIN_ROLE) or (marker and not member.get_role(VERIFIED_ROLE))
+            if not member.bot and (needs_sync or member.id in self.sync_queue):
+                if member.id not in self.busy and self.sync_due.get(member.id, 0) <= now:
+                    candidates.append(member)
+        candidates.sort(key=lambda m: (m.id not in self.sync_queue, self.sync_due.get(m.id, 0)))
+        for member in candidates[:3]:
+            self.busy.add(member.id)
+            self.sync_queue.discard(member.id)
+            self.sync_due[member.id] = now + 120
+            try:
+                account = await self.accounts.lookup(member.id)
+                if account is not None:
+                    await apply_verified_roles(guild, member.id, account)
+            except VerificationUnavailable as exc:
+                log.warning('Verification role sync waiting: %s', exc)
+            except discord.HTTPException as exc:
+                log.warning('Verification role sync failed: member=%s HTTP=%s', member.id, exc.status)
+            finally:
+                self.busy.discard(member.id)
+
+    @sync_roles.before_loop
+    async def before_role_sync(self):
+        await self.bot.wait_until_ready()
 
     @commands.Cog.listener()
     async def on_ready(self):
@@ -185,7 +246,9 @@ class Verification(commands.Cog):
         if self.upgrade_task is None:
             self.upgrade_task = asyncio.create_task(self.upgrade_panels(guild))
         try:
-            roles_for(guild)
+            pending, verified = roles_for(guild)
+            log.info('Verification role mapping: pending=%s (%s); community=%s (%s); pending members=%s',
+                     pending.name, pending.id, verified.name, verified.id, len(pending.members))
             account = await self.accounts.lookup(guild.owner_id)
             log.info('Bloxlink guild lookup completed; owner linked: %s; verification roles assignable: True', bool(account))
             self.checked_connection = True

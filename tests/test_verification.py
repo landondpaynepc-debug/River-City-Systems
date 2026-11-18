@@ -13,8 +13,10 @@ async def run():
             raise AssertionError('Missing key should block verification')
         except v.VerificationUnavailable:
             pass
-    pending, verified = object(), object()
+    pending, verified = SimpleNamespace(id=v.JOIN_ROLE), SimpleNamespace(id=v.VERIFIED_ROLE)
     member=SimpleNamespace(roles=[pending], add_roles=AsyncMock(), remove_roles=AsyncMock())
+    member.add_roles.side_effect = lambda role, **kw: member.roles.append(role)
+    member.remove_roles.side_effect = lambda role, **kw: member.roles.remove(role)
     guild=SimpleNamespace(id=v.GUILD, fetch_member=AsyncMock(return_value=member))
     interaction=SimpleNamespace(guild=guild, user=SimpleNamespace(id=42,bot=False),
         response=SimpleNamespace(defer=AsyncMock()), followup=SimpleNamespace(send=AsyncMock()))
@@ -34,6 +36,7 @@ async def run():
     assert app.bot.get_command('cmds')
     await app.bot.add_cog(v.Verification(app.bot))
     assert app.bot.get_command('verify')
+    await app.bot.remove_cog('Verification')
     print('PASS: missing-key and unlinked-account gates, strict account IDs, verified role transition, persistent buttons, command registration')
 
 asyncio.run(run())
