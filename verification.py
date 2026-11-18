@@ -71,21 +71,30 @@ def roles_for(guild):
     return pending, verified
 
 
+def pending_roles(guild):
+    return [role for role in guild.roles if role.id == JOIN_ROLE or
+            re.sub('[^a-z]', '', role.name.lower()) == 'unverified']
+
+
 async def apply_verified_roles(guild, user_id, roblox_id):
     pending, verified = roles_for(guild)
     member = await guild.fetch_member(user_id)
-    changed = verified not in member.roles or pending in member.roles
+    pending_set = [role for role in pending_roles(guild) if role in member.roles]
+    for role in pending_set:
+        if not role.is_assignable() or role.managed or role.permissions.administrator:
+            raise VerificationUnavailable(f"I cannot remove the Unverified role ({role.id}). Staff must check role order.")
+    changed = verified not in member.roles or bool(pending_set)
     # Independent role endpoints preserve unrelated roles during concurrent updates.
     if verified not in member.roles:
         await member.add_roles(verified, reason=f'Bloxlink verified Roblox ID {roblox_id}')
-    if pending in member.roles:
-        await member.remove_roles(pending, reason='Bloxlink confirmed Roblox account ownership')
+    if pending_set:
+        await member.remove_roles(*pending_set, reason='Bloxlink confirmed Roblox account ownership')
     saved = await guild.fetch_member(user_id)
-    if pending in saved.roles or verified not in saved.roles:
+    if any(role in saved.roles for role in pending_roles(guild)) or verified not in saved.roles:
         raise VerificationUnavailable('The role update has not completed. Please try again or contact staff.')
     if changed:
         log.info('Verification roles repaired: Discord=%s CommunityMember=%s UnverifiedRemoved=%s',
-                 user_id, verified.id, pending.id)
+                 user_id, verified.id, [role.id for role in pending_set])
     return changed
 
 
@@ -197,7 +206,7 @@ class Verification(commands.Cog):
     async def on_member_update(self, before, after):
         if after.guild.id != GUILD or after.bot or before.roles == after.roles:
             return
-        if after.get_role(JOIN_ROLE) or not after.get_role(VERIFIED_ROLE):
+        if any(role in after.roles for role in pending_roles(after.guild)) or not after.get_role(VERIFIED_ROLE):
             self.sync_queue.add(after.id)
             self.sync_due[after.id] = 0
 
@@ -209,10 +218,11 @@ class Verification(commands.Cog):
         if not guild:
             return
         now = time.monotonic()
+        unverified = pending_roles(guild)
         candidates = []
         for member in guild.members:
             marker = any(re.sub('[^a-z]', '', role.name.lower()) == 'verified' for role in member.roles)
-            needs_sync = member.get_role(JOIN_ROLE) or (marker and not member.get_role(VERIFIED_ROLE))
+            needs_sync = any(role in member.roles for role in unverified) or (marker and not member.get_role(VERIFIED_ROLE))
             if not member.bot and (needs_sync or member.id in self.sync_queue):
                 if member.id not in self.busy and self.sync_due.get(member.id, 0) <= now:
                     candidates.append(member)
@@ -249,6 +259,8 @@ class Verification(commands.Cog):
             pending, verified = roles_for(guild)
             log.info('Verification role mapping: pending=%s (%s); community=%s (%s); pending members=%s',
                      pending.name, pending.id, verified.name, verified.id, len(pending.members))
+            log.info('All Unverified roles: %s; cached members=%s total=%s',
+                     [(r.id, r.name, len(r.members)) for r in pending_roles(guild)], len(guild.members), guild.member_count)
             account = await self.accounts.lookup(guild.owner_id)
             log.info('Bloxlink guild lookup completed; owner linked: %s; verification roles assignable: True', bool(account))
             self.checked_connection = True
