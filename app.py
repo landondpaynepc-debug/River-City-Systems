@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import secrets
+import hashlib
 from datetime import timedelta
 from pathlib import Path
 
@@ -27,6 +28,8 @@ HIGH_RANK = int(os.getenv("HIGH_RANK_ROLE_ID") or 1572082345949790311)
 BLUE = 0x1066EC
 ticket_lock = asyncio.Lock()
 panel_lock = asyncio.Lock()
+welcome_lock = asyncio.Lock()
+welcomed_joins = {}
 log = logging.getLogger("rivercity")
 
 
@@ -101,6 +104,29 @@ bot = RiverBot(command_prefix=".", intents=intents,
 async def on_member_join(member):
     if member.guild.id != GUILD or member.bot:
         return
+    if member.joined_at is None:
+        member = await member.guild.fetch_member(member.id)
+    if member.joined_at is None:
+        log.warning("Cannot identify join event for welcome: %s", member.id)
+        return
+    nonce = welcome_nonce(member)
+    async with welcome_lock:
+        if nonce in welcomed_joins:
+            return
+        await welcome_join(member, nonce)
+        welcomed_joins[nonce] = True
+        if len(welcomed_joins) > 2048:
+            welcomed_joins.pop(next(iter(welcomed_joins)))
+
+
+def welcome_nonce(member):
+    # Same join gets the same Discord-enforced nonce across bot processes.
+    # A later leave/rejoin gets a distinct key and its own welcome.
+    event = f"welcome:{member.guild.id}:{member.id}:{member.joined_at.isoformat()}"
+    return hashlib.sha256(event.encode()).hexdigest()[:24]
+
+
+async def welcome_join(member, nonce):
     role = member.guild.get_role(JOIN_ROLE)
     if role and role.is_assignable() and not role.permissions.administrator:
         try:
@@ -111,7 +137,8 @@ async def on_member_join(member):
         log.warning("Pending verification role is missing or unassignable")
     channel = member.guild.get_channel(WELCOME)
     if channel:
-        await channel.send(view=welcome(member, DASHBOARD), allowed_mentions=discord.AllowedMentions(users=[member]))
+          await channel.send(view=welcome(member, DASHBOARD), nonce=nonce,
+                             allowed_mentions=discord.AllowedMentions(users=[member]))
 
 
 def support_role(guild):
