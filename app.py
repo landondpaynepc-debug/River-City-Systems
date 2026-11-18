@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 
 from panels import ASSETS, Panel, SUPPORT_TYPES
 from sessions import Sessions, community_role, session_card, stats, welcome
+from verification import Verification, JOIN_ROLE
 
 load_dotenv(Path(__file__).with_name(".env"))
 
@@ -60,6 +61,7 @@ class RiverBot(commands.Bot):
 
     async def setup_hook(self):
         await self.add_cog(Sessions(DASHBOARD, self))
+        await self.add_cog(Verification(self))
         self.add_view(session_card("ssv", None))
         self.add_view(session_card("info", None, numbers="Loading counts…"))
         self.add_view(build_panel(PANEL))
@@ -97,14 +99,14 @@ bot = RiverBot(command_prefix=".", intents=intents,
 async def on_member_join(member):
     if member.guild.id != GUILD or member.bot:
         return
-    role = community_role(member.guild)
+    role = member.guild.get_role(JOIN_ROLE)
     if role and role.is_assignable() and not role.permissions.administrator:
         try:
-            await member.add_roles(role, reason="River City Roleplay community member joined")
+            await member.add_roles(role, reason="River City Roleplay pending verification")
         except discord.HTTPException:
-            log.exception("Could not assign Community Member on join")
+            log.exception("Could not assign pending verification role on join")
     else:
-        log.warning("Community Member role is missing, ambiguous, or unassignable")
+        log.warning("Pending verification role is missing or unassignable")
     channel = member.guild.get_channel(WELCOME)
     if channel:
         await channel.send(view=welcome(member, DASHBOARD), allowed_mentions=discord.AllowedMentions(users=[member]))
@@ -285,8 +287,8 @@ async def on_ready():
             log.info("Command receipts ready in %s", room.id)
         except discord.HTTPException:
             log.exception("Command receipt channel initialization failed")
-        role = community_role(guild)
-        log.info("Community Member join role: %s; assignable: %s", role.id if role else None,
+        role = guild.get_role(JOIN_ROLE)
+        log.info("Pending verification join role: %s; assignable: %s", role.id if role else None,
                  bool(role and role.is_assignable() and guild.me.guild_permissions.manage_roles and not role.permissions.administrator))
     if guild and os.getenv("ERLC_SERVER_KEY"):
         snapshot = await stats()
@@ -386,7 +388,7 @@ async def clear(ctx, amount: commands.Range[int, 1, 100]):
 @bot.command(name="cmds", aliases=["help", "commands"])
 async def show_help(ctx):
     session_help = "**Sessions**\n`.ssv` vote · `.ssu` startup · `.ssd` shutdown\n`.serverinfo` live ER:LC counts"
-    await ctx.send(embed=card("River City Roleplay", f"{session_help}\n\n**Command list** · `.cmds`, `.commands`, `.help`\n**Member assistance** · <#{PANEL}>\n\n**Staff commands**\n`.kick @member [reason]`\n`.ban @member [reason]`\n`.unban user_id [reason]`\n`.timeout @member minutes [reason]`\n`.untimeout @member [reason]`\n`.clear 1–100`\n`.ticketpanel`\n`.dashboard`"))
+    await ctx.send(embed=card("River City Roleplay", f"{session_help}\n\n**Command list** · `.cmds`, `.commands`, `.help`\n**Member assistance** · <#{PANEL}>\n\n**Staff commands**\n`.kick @member [reason]`\n`.ban @member [reason]`\n`.unban user_id [reason]`\n`.timeout @member minutes [reason]`\n`.untimeout @member [reason]`\n`.clear 1–100`\n`.ticketpanel`\n`.dashboard`\n`.verify` - verification panel\n`.verify lock` - configure verified access (Manage Server)"))
 
 
 @bot.event
