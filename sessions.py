@@ -221,9 +221,11 @@ class Sessions(commands.Cog):
         self.dashboard = dashboard
         self.bot = bot
         self.live_messages = {}
+        self.restore_task = asyncio.create_task(self.restore_live_messages())
         self.live_updates.start()
 
     def cog_unload(self):
+        self.restore_task.cancel()
         self.live_updates.cancel()
 
     @tasks.loop(seconds=30)
@@ -241,6 +243,9 @@ class Sessions(commands.Cog):
                 log.warning("Could not update live session card %s", message.id)
 
     @live_updates.before_loop
+    async def wait_until_ready(self):
+        await self.bot.wait_until_ready()
+
     async def restore_live_messages(self):
         await self.bot.wait_until_ready()
         guild = self.bot.get_guild(1491365342646112386)
@@ -253,6 +258,7 @@ class Sessions(commands.Cog):
                         getattr(item, "custom_id", None) == "rc:session:refresh" for item in components(message)
                     ):
                         self.live_messages.setdefault(channel.id, message)
+                        log.info("Live server-info card found in %s", channel.id)
                         break
             except discord.HTTPException:
                 log.warning("Could not restore live session card in %s", channel.id)
