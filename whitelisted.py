@@ -42,10 +42,11 @@ class DepartmentMenu(ui.Select):
 class DepartmentPanel(ui.LayoutView):
     def __init__(self):
         super().__init__(timeout=None)
-        self.add_item(ui.Container(
+        for component in (
             panel_image("whitelisted.webp", "River City Roleplay — Whitelisted Departments"),
             ui.TextDisplay("## River City Departments\n> Select a whitelisted department below to get its Discord invite."),
             ui.ActionRow(DepartmentMenu()),
             ui.Separator(),
             panel_image("footer.png", "River City Roleplay"),
-        ))
+        ):
+            self.add_item(component)

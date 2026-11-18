@@ -363,6 +363,17 @@ async def whitelisted(ctx):
         await ctx.send("Only members with the Staff role can post the department panel.")
         return
     try:
+        reference = ctx.message.reference
+        if reference and reference.message_id and reference.channel_id == ctx.channel.id:
+            target = await ctx.channel.fetch_message(reference.message_id)
+            if target.author == ctx.bot.user and any(
+                getattr(item, "custom_id", None) == "rivercity:whitelisted:department"
+                for item in discord.ui.LayoutView.from_message(target).walk_children()
+            ):
+                await target.edit(view=DepartmentPanel(), attachments=[])
+                return
+            await ctx.send("Reply to a River City department panel to update it, or use .whitelisted on its own to post one.")
+            return
         await ctx.send(view=DepartmentPanel())
     except discord.HTTPException as error:
         log.exception("Could not post department panel in channel %s", ctx.channel.id)
