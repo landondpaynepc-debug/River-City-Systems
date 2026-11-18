@@ -47,5 +47,11 @@ class DepartmentPanel(ui.LayoutView):
 
 
 async def post_departments(ctx):
-    with discord.File(ASSETS / "whitelisted.webp") as banner, discord.File(ASSETS / "footer.png") as footer:
-        await ctx.send(view=DepartmentPanel(), files=[banner, footer])
+    with (ASSETS / "whitelisted.webp").open("rb") as banner, (ASSETS / "footer.png").open("rb") as footer:
+        await ctx.send(
+            view=DepartmentPanel(),
+            files=[
+                discord.File(banner, filename="whitelisted.webp"),
+                discord.File(footer, filename="footer.png"),
+            ],
+        )
