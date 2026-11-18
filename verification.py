@@ -243,13 +243,18 @@ class Verification(commands.Cog):
     async def upgrade_panels(self, guild):
         priority = guild.get_channel(1572426473057558579)
         channels = ([priority] if priority else []) + [c for c in [*guild.text_channels, *guild.threads] if c != priority]
+        log.info('Verification migration starting; priority channel available: %s', bool(priority))
         for channel in channels:
             try:
-                async for message in channel.history(limit=None if channel == priority else 100):
+                async for message in channel.history(limit=100):
+                    if channel == priority and message.author.id == self.bot.user.id:
+                        log.info('Verification candidate: message=%s v2=%s embeds=%s component_types=%s', message.id, message.flags.components_v2, len(message.embeds), [c.type.value for c in message.components])
                     if message.author.id == self.bot.user.id and is_verification_panel(message):
                         await self.update_panel(message, guild)
             except discord.HTTPException as exc:
                 log.warning('Could not update verification panels in %s: HTTP %s', channel.id, exc.status)
+            except Exception:
+                log.exception('Verification migration failed in channel %s', channel.id)
 
     async def gate(self, ctx):
         pending, verified = roles_for(ctx.guild)
