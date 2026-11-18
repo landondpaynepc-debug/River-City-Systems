@@ -4,6 +4,9 @@ import logging
 import os
 import re
 import time
+import hashlib
+import json
+from datetime import datetime, timezone, timedelta
 
 import aiohttp
 import discord
@@ -223,10 +226,12 @@ class Sessions(commands.Cog):
         self.live_messages = {}
         self.restore_task = asyncio.create_task(self.restore_live_messages())
         self.live_updates.start()
+        self.game_logger = GameLogger(bot)
 
     def cog_unload(self):
         self.restore_task.cancel()
         self.live_updates.cancel()
+        self.game_logger.poll.cancel()
 
     @tasks.loop(seconds=30)
     async def live_updates(self):
@@ -326,3 +331,130 @@ class Sessions(commands.Cog):
                 except discord.NotFound:
                     self.live_messages.pop(ctx.channel.id, None)
             self.live_messages[ctx.channel.id] = await publish(ctx, "info", numbers=numbers)
+
+
+GAME_LOG_TYPES = {
+    'JoinLogs': 'Player joined / left',
+    'KillLogs': 'Player death',
+    'CommandLogs': 'In-game command',
+    'ModCalls': 'Moderator call',
+    'EmergencyCalls': 'Emergency call',
+}
+
+
+def game_events(data):
+    """Stable identities, including identical records occurring in one second."""
+    events = []
+    for kind in GAME_LOG_TYPES:
+        rows = data.get(kind, [])
+        if not isinstance(rows, list):
+            continue
+        occurrences = {}
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            stamp = row.get('Timestamp', row.get('StartedAt'))
+            if not isinstance(stamp, (int, float)) or isinstance(stamp, bool):
+                continue
+            raw = json.dumps([kind, row], sort_keys=True, separators=(',', ':'))
+            occurrences[raw] = occurrences.get(raw, 0) + 1
+            digest = hashlib.sha256(f'{raw}:{occurrences[raw]}'.encode()).hexdigest()[:24]
+            events.append((stamp, digest, kind, row))
+    return sorted(events)
+
+
+def safe_game_value(value):
+    text = str(value)
+    for key, secret in os.environ.items():
+        if any(word in key.upper() for word in ('TOKEN', 'KEY', 'PASSWORD', 'SECRET')) and len(secret) >= 12:
+            text = text.replace(secret, '[redacted]')
+    return discord.utils.escape_mentions(discord.utils.escape_markdown(text))[:1000] or 'None'
+
+
+class GameLogger:
+    """Replay API log windows; Discord history survives Render restarts."""
+    def __init__(self, bot):
+        self.bot = bot
+        self.seen = {}
+        self.restored = set()
+        self.floors = {}
+        self.retry_at = 0
+        self.poll.start()
+
+    async def restore(self, channel):
+        if channel.id in self.restored:
+            return
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+        seen = set()
+        async for message in channel.history(limit=None, after=cutoff):
+            if message.author.id == self.bot.user.id:
+                for embed in message.embeds:
+                    footer = embed.footer.text or ''
+                    if footer.startswith('RC event '):
+                        seen.add(footer.removeprefix('RC event '))
+        self.seen[channel.id] = seen
+        self.floors[channel.id] = cutoff.timestamp() if seen else time.time() - 300
+        self.restored.add(channel.id)
+        log.info('Game log destination ready: %s (%s prior events)', channel.id, len(seen))
+
+    async def deliver(self, channel, event):
+        stamp, digest, kind, row = event
+        await self.restore(channel)
+        if digest in self.seen[channel.id] or stamp < self.floors[channel.id]:
+            return
+        title = GAME_LOG_TYPES[kind]
+        if kind == 'JoinLogs':
+            title = 'Player joined' if row.get('Join') else 'Player left'
+        embed = discord.Embed(title=title, colour=0x1066EC,
+                              timestamp=datetime.fromtimestamp(stamp, timezone.utc))
+        for name, value in row.items():
+            if name not in ('Timestamp', 'StartedAt', 'Join'):
+                embed.add_field(name=safe_game_value(name)[:256], value=safe_game_value(value), inline=False)
+                if len(embed.fields) >= 5:
+                    break
+        embed.set_footer(text=f'RC event {digest}')
+        await channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none(),
+                           nonce=digest, silent=True)
+        self.seen[channel.id].add(digest)
+
+    @tasks.loop(seconds=30)
+    async def poll(self):
+        if time.monotonic() < self.retry_at or not self.bot.is_ready():
+            return
+        key = os.getenv('ERLC_SERVER_KEY', '').strip()
+        if not key:
+            return
+        try:
+            guild = self.bot.get_guild(1491365342646112386)
+            channel = guild.get_channel(1572425404726251572) if guild else None
+            if channel is None:
+                log.warning('Game logging channel 1572425404726251572 is unavailable')
+                self.retry_at = time.monotonic() + 300
+                return
+            await self.restore(channel)
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as client:
+                async with client.get('https://api.erlc.gg/v2/server',
+                                      params={kind: 'true' for kind in GAME_LOG_TYPES},
+                                      headers={'Server-Key': key}, allow_redirects=False) as response:
+                    if response.status != 200:
+                        retry = response.headers.get('Retry-After', '60')
+                        self.retry_at = time.monotonic() + max(30, min(float(retry) if retry.isdecimal() else 60, 900))
+                        log.warning('Game logs API returned HTTP %s', response.status)
+                        return
+                    data = await response.json()
+            if not isinstance(data, dict):
+                return
+            jail_channel = guild.get_channel(1572425299818450954)
+            for event in game_events(data):
+                await self.deliver(channel, event)
+                if event[2] == 'CommandLogs' and re.match(r'^:jail(?:\s|$)', str(event[3].get('Command', '')), re.I):
+                    if jail_channel:
+                        await self.deliver(jail_channel, event)
+        except (aiohttp.ClientError, asyncio.TimeoutError, discord.HTTPException, ValueError, TypeError, OverflowError):
+            # No API payloads or credentials in application logs.
+            log.warning('Game log polling/delivery failed; will retry next cycle')
+            self.retry_at = time.monotonic() + 60
+
+    @poll.before_loop
+    async def ready(self):
+        await self.bot.wait_until_ready()
