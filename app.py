@@ -59,7 +59,7 @@ class RiverBot(commands.Bot):
             return room
 
     async def setup_hook(self):
-        await self.add_cog(Sessions(DASHBOARD))
+        await self.add_cog(Sessions(DASHBOARD, self))
         self.add_view(session_card("ssv", None))
         self.add_view(session_card("info", None, numbers="Loading counts…"))
         self.add_view(build_panel(PANEL))

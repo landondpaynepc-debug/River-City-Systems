@@ -8,7 +8,7 @@ import time
 import aiohttp
 import discord
 from discord import ui
-from discord.ext import commands
+from discord.ext import commands, tasks
 
 from panels import ASSETS, gallery
 
@@ -18,6 +18,7 @@ BANNERS = {"ssu": "SSU.png", "ssd": "SSD.png", "ssv": "SESSION VOTE.png", "info"
 lock = asyncio.Lock()
 stats_lock = asyncio.Lock()
 stats_cache = (0, "")
+server_online = None
 log = logging.getLogger("rivercity.sessions")
 
 
@@ -62,18 +63,22 @@ def format_stats(data):
 
 
 async def stats():
-    global stats_cache
+    global stats_cache, server_online
     async with stats_lock:
         if time.monotonic() < stats_cache[0]:
             return stats_cache[1]
         wait = 30
         result = "Live counts are temporarily unavailable. You can still join with the code below."
+        server_online = None
         try:
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=8)) as client:
                 async with client.get("https://api.erlc.gg/v2/server", params={"Players": "true", "Queue": "true"},
                                       headers={"Server-Key": os.environ["ERLC_SERVER_KEY"]}, allow_redirects=False) as response:
                     if response.status == 200:
-                        result = format_stats(await response.json())
+                        data = await response.json()
+                        result = format_stats(data)
+                        count = data.get("CurrentPlayers")
+                        server_online = count > 0 if isinstance(count, int) else None
                     else:
                         log.warning("ER:LC status returned HTTP %s", response.status)
                         if response.status == 429:
@@ -182,8 +187,13 @@ def session_card(kind, guild, *, ids=(), numbers="", dashboard=None, mentions=""
         parts.extend([ui.TextDisplay("Today’s session has concluded. Thank you to the civilians, departments, and staff who brought River City to life. Watch this channel for the next vote."),
                       ui.ActionRow(ui.Button(label="Session closed", custom_id="rc:session:ssd", disabled=True))])
     else:
-        parts.extend([ui.TextDisplay(f"Welcome to River City Roleplay. Use **{CODE}** to join the private server. Refresh for the latest in-game counts."),
-                      ui.Separator(), ui.TextDisplay(numbers), ui.ActionRow(join, Refresh(guild))])
+        status = ui.Button(label="Status unavailable", disabled=True, custom_id="rc:session:status")
+        if server_online is not None:
+            status.label = "Online" if server_online else "Offline"
+            status.emoji = discord.PartialEmoji.from_str(
+                "<:green_wifi:1507960431220752456>" if server_online else "<:closed_wifi:1507960524221186139>")
+        parts.extend([ui.TextDisplay(f"Welcome to River City Roleplay. Use **{CODE}** to join the private server. Live counts update every 30 seconds."),
+                      ui.Separator(), ui.TextDisplay(numbers), ui.ActionRow(status, join, Refresh(guild))])
     parts.extend([ui.Separator(), gallery("footer.png", "River City Roleplay")])
     view.add_item(ui.Container(*parts))
     return view
@@ -207,8 +217,47 @@ def host():
 
 
 class Sessions(commands.Cog):
-    def __init__(self, dashboard):
+    def __init__(self, dashboard, bot):
         self.dashboard = dashboard
+        self.bot = bot
+        self.live_messages = {}
+        self.live_updates.start()
+
+    def cog_unload(self):
+        self.live_updates.cancel()
+
+    @tasks.loop(seconds=30)
+    async def live_updates(self):
+        if not self.live_messages:
+            return
+        numbers = await stats()
+        for channel_id, message in list(self.live_messages.items()):
+            try:
+                await message.edit(view=session_card("info", message.guild, numbers=numbers),
+                                   allowed_mentions=discord.AllowedMentions.none())
+            except discord.NotFound:
+                self.live_messages.pop(channel_id, None)
+            except discord.HTTPException:
+                log.warning("Could not update live session card %s", message.id)
+
+    @live_updates.before_loop
+    async def restore_live_messages(self):
+        await self.bot.wait_until_ready()
+        guild = self.bot.get_guild(1491365342646112386)
+        if not guild:
+            return
+        for channel in [*guild.text_channels, *guild.threads]:
+            try:
+                async for message in channel.history(limit=None):
+                    if message.author.id == self.bot.user.id and any(
+                        getattr(item, "custom_id", None) == "rc:session:refresh" for item in components(message)
+                    ):
+                        self.live_messages.setdefault(channel.id, message)
+                        break
+            except discord.HTTPException:
+                log.warning("Could not restore live session card in %s", channel.id)
+        log.info("Restored %s live server-info cards", len(self.live_messages))
+
 
     @commands.command()
     @host()
@@ -260,4 +309,14 @@ class Sessions(commands.Cog):
         if not has_staff_role(ctx.author):
             await ctx.send("Only members with the Staff role can use .serverinfo.")
             return
-        await publish(ctx, "info", numbers=await stats())
+        async with lock:
+            numbers = await stats()
+            previous = self.live_messages.get(ctx.channel.id)
+            if previous:
+                try:
+                    await previous.edit(view=session_card("info", ctx.guild, numbers=numbers),
+                                        allowed_mentions=discord.AllowedMentions.none())
+                    return
+                except discord.NotFound:
+                    self.live_messages.pop(ctx.channel.id, None)
+            self.live_messages[ctx.channel.id] = await publish(ctx, "info", numbers=numbers)
