@@ -142,18 +142,24 @@ class VerificationView(discord.ui.LayoutView):
             header, discord.ui.Separator(),
             discord.ui.TextDisplay(
                 '**01 - Link your account**\nPress **Verify with Roblox** and complete linking on Bloxlink. '
-                'Use your current Discord account and select **River City Roleplay**.\n\n'
-                '**02 - Confirm your verification**\nReturn here and press **Check Verification**. '
-                'We confirm your linked account before granting Community Member.\n\n'
-                '**03 - Join the community**\nRead the rules and join a session using your linked Roblox account. '
-                'Stay connected to a voice channel while in game.\n\n'
-                '**Need help?** Open a ticket in <#1572082489743249591>.'),
+                'Use your current Discord account and select **River City Roleplay**.'),
+            discord.ui.Separator(spacing=discord.SeparatorSpacing.small),
+            discord.ui.TextDisplay('**02 - Confirm your verification**\nReturn here and press **Check Verification**. '
+                'We confirm your linked account before granting Community Member.'),
+            discord.ui.Separator(spacing=discord.SeparatorSpacing.small),
+            discord.ui.TextDisplay('**03 - Join the community**\nRead the rules and join a session using your linked Roblox account. '
+                'Stay connected to a voice channel while in game.'),
+            discord.ui.Separator(),
+            discord.ui.TextDisplay('**Need help?** Open a ticket in <#1572082489743249591>.'),
             row, discord.ui.Separator(),
             discord.ui.TextDisplay('-# River City Roleplay | Account linking powered by Bloxlink'),
-            accent_colour=0x1066EC))
+            ))
 
 
 def is_verification_panel(message):
+    if any('VERIFICATION' in (embed.title or '').upper() and 'RIVER CITY' in (embed.title or '').upper()
+           for embed in message.embeds):
+        return True
     return any(getattr(item, 'custom_id', None) == 'rc:verification:check'
                for item in discord.ui.LayoutView.from_message(message).walk_children())
 
@@ -215,19 +221,35 @@ class Verification(commands.Cog):
             view = VerificationView(self, ctx.guild)
             async for message in ctx.channel.history(limit=100):
                 if message.author.id == ctx.bot.user.id and is_verification_panel(message):
-                    await message.edit(content=None, embeds=[], view=view)
+                    await self.update_panel(message, ctx.guild)
                     return
-            await ctx.send(view=view, allowed_mentions=discord.AllowedMentions.none())
+            sent = await ctx.send(view=view, allowed_mentions=discord.AllowedMentions.none())
+            await self.confirm_panel(sent)
+
+    async def confirm_panel(self, message):
+        saved = await message.channel.fetch_message(message.id)
+        valid = saved.flags.components_v2 and not saved.embeds and any(c.type.value == 17 for c in saved.components)
+        log.info('Verification panel check: channel=%s message=%s components_v2=%s embeds=%s container=%s',
+                 saved.channel.id, saved.id, saved.flags.components_v2, len(saved.embeds),
+                 any(c.type.value == 17 for c in saved.components))
+        if not valid:
+            raise RuntimeError('Discord did not store the verification panel as Components V2')
+
+    async def update_panel(self, message, guild):
+        await message.edit(content=None, embeds=[], attachments=[], view=VerificationView(self, guild),
+                           allowed_mentions=discord.AllowedMentions.none())
+        await self.confirm_panel(message)
 
     async def upgrade_panels(self, guild):
-        for channel in guild.text_channels:
+        priority = guild.get_channel(1572426473057558579)
+        channels = ([priority] if priority else []) + [c for c in [*guild.text_channels, *guild.threads] if c != priority]
+        for channel in channels:
             try:
-                async for message in channel.history(limit=100):
+                async for message in channel.history(limit=None if channel == priority else 100):
                     if message.author.id == self.bot.user.id and is_verification_panel(message):
-                        await message.edit(content=None, embeds=[], view=VerificationView(self, guild))
-                        log.info('Upgraded verification panel to Components V2 in %s', channel.id)
-            except discord.HTTPException:
-                continue
+                        await self.update_panel(message, guild)
+            except discord.HTTPException as exc:
+                log.warning('Could not update verification panels in %s: HTTP %s', channel.id, exc.status)
 
     async def gate(self, ctx):
         pending, verified = roles_for(ctx.guild)
