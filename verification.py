@@ -147,7 +147,23 @@ class Verification(commands.Cog):
         self.busy = set()
         self.cooldowns = {}
         self.panel_lock = asyncio.Lock()
+        self.checked_connection = False
         bot.add_view(VerificationView(self))
+
+    @commands.Cog.listener()
+    async def on_ready(self):
+        if self.checked_connection:
+            return
+        guild = self.bot.get_guild(GUILD)
+        if not guild:
+            return
+        try:
+            roles_for(guild)
+            account = await self.accounts.lookup(guild.owner_id)
+            log.info('Bloxlink guild lookup completed; owner linked: %s; verification roles assignable: True', bool(account))
+            self.checked_connection = True
+        except VerificationUnavailable as exc:
+            log.warning('Verification startup check: %s', exc)
 
     @commands.command(name='verify')
     @commands.guild_only()
