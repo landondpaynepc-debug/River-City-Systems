@@ -26,7 +26,6 @@ PANEL = 1572082489743249591
 SUPPORT = int(os.getenv("SUPPORT_ROLE_ID") or 0)
 DASHBOARD = 1492006832779165756
 HIGH_RANK = int(os.getenv("HIGH_RANK_ROLE_ID") or 1572082345949790311)
-BLUE = 0x1066EC
 ticket_lock = asyncio.Lock()
 panel_lock = asyncio.Lock()
 welcome_lock = asyncio.Lock()
@@ -35,7 +34,7 @@ log = logging.getLogger("rivercity")
 
 
 def card(title, description):
-    embed = discord.Embed(title=title, description=description, color=BLUE)
+    embed = discord.Embed(title=title, description=description)
     embed.set_footer(text="River City Roleplay")
     return embed
 
@@ -267,7 +266,7 @@ class Controls(TicketView):
                 await interaction.followup.send("This ticket has already been claimed.", ephemeral=True)
                 return
             embed.add_field(name="Claimed by", value=interaction.user.mention)
-            embed.color = discord.Color.green()
+            embed.color = None
             await message.edit(embed=embed)
         await interaction.followup.send("You claimed this ticket.", ephemeral=True)
 

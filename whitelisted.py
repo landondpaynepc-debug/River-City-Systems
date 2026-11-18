@@ -35,7 +35,8 @@ class DepartmentMenu(ui.Select):
             ui.TextDisplay(f"## {name}"),
             ui.ActionRow(ui.Button(label="Join department Discord", url=url)),
         ))
-        await interaction.response.send_message(view=view, ephemeral=True)
+        await interaction.response.edit_message(view=self.view)
+        await interaction.followup.send(view=view, ephemeral=True)
 
 
 class DepartmentPanel(ui.LayoutView):
@@ -47,5 +48,4 @@ class DepartmentPanel(ui.LayoutView):
             ui.ActionRow(DepartmentMenu()),
             ui.Separator(),
             panel_image("footer.png", "River City Roleplay"),
-            accent_colour=0x176BEA,
         ))

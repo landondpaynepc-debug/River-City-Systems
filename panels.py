@@ -34,6 +34,7 @@ class DeskMenu(ui.Select):
 
     async def callback(self, interaction):
         await interaction.response.send_modal(RequestForm(self.values[0], self.intake))
+        await interaction.message.edit(view=self.view)
 
 
 class RequestForm(ui.Modal):
@@ -56,9 +57,10 @@ class RulesMenu(ui.Select):
 
     async def callback(self, interaction):
         title = self.values[0]
-        embed = discord.Embed(title=title, description=RULES[title], color=0x1066EC)
+        embed = discord.Embed(title=title, description=RULES[title])
         embed.set_footer(text=BRAND)
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await interaction.response.edit_message(view=self.view)
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
 
 class RoleMenu(ui.Select):
@@ -71,7 +73,7 @@ class RoleMenu(ui.Select):
         name = self.values[0]
         ident = os.getenv(f"{name.upper()}_NOTIFICATION_ROLE_ID", "")
         guild = interaction.guild
-        await interaction.response.defer(ephemeral=True, thinking=True)
+        await interaction.response.edit_message(view=self.view)
         async with role_lock:
             if ident:
                 role = guild.get_role(int(ident)) if ident.isdecimal() else None

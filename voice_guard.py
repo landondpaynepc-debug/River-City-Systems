@@ -134,7 +134,7 @@ class VoiceGuard(commands.Cog):
                            allowed_mentions=discord.AllowedMentions.none())
 
     async def audit(self, channel, row, status):
-        embed = discord.Embed(title='Voice requirement | ' + status, colour=0x1066EC,
+        embed = discord.Embed(title='Voice requirement | ' + status,
             description=f"**Player:** {row['name']} ({row['roblox']})\n**Discord:** <@{row['discord']}>\n"
                         f"**Reason:** In game without a Discord voice connection after {GRACE} seconds.\n"
                         f"**Jail duration:** 5 minutes\n**Release due:** <t:{int(row['due'])}:R>")

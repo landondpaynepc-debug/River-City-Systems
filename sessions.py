@@ -405,7 +405,7 @@ class GameLogger:
         title = GAME_LOG_TYPES[kind]
         if kind == 'JoinLogs':
             title = 'Player joined' if row.get('Join') else 'Player left'
-        embed = discord.Embed(title=title, colour=0x1066EC,
+        embed = discord.Embed(title=title,
                               timestamp=datetime.fromtimestamp(stamp, timezone.utc))
         for name, value in row.items():
             if name not in ('Timestamp', 'StartedAt', 'Join'):
