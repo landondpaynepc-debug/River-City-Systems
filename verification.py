@@ -246,11 +246,26 @@ class Verification(commands.Cog):
         log.info('Verification migration starting; priority channel available: %s', bool(priority))
         for channel in channels:
             try:
+                found = False
+                if channel == priority:
+                    perms = channel.permissions_for(guild.me)
+                    log.info('Verification channel permissions: view=%s history=%s send=%s', perms.view_channel, perms.read_message_history, perms.send_messages)
+                    if not (perms.view_channel and perms.read_message_history and perms.send_messages):
+                        overwrite = channel.overwrites_for(guild.me)
+                        overwrite.view_channel = True
+                        overwrite.read_message_history = True
+                        overwrite.send_messages = True
+                        await channel.set_permissions(guild.me, overwrite=overwrite, reason='Maintain the requested verification panel')
                 async for message in channel.history(limit=100):
                     if channel == priority and message.author.id == self.bot.user.id:
                         log.info('Verification candidate: message=%s v2=%s embeds=%s component_types=%s', message.id, message.flags.components_v2, len(message.embeds), [c.type.value for c in message.components])
                     if message.author.id == self.bot.user.id and is_verification_panel(message):
+                        found = True
                         await self.update_panel(message, guild)
+                if channel == priority and not found:
+                    sent = await channel.send(view=VerificationView(self, guild),
+                        nonce=f'rcv2-{channel.id}', allowed_mentions=discord.AllowedMentions.none())
+                    await self.confirm_panel(sent)
             except discord.HTTPException as exc:
                 log.warning('Could not update verification panels in %s: HTTP %s', channel.id, exc.status)
             except Exception:
