@@ -70,7 +70,7 @@ def roles_for(guild):
     return pending, verified
 
 
-class VerificationView(discord.ui.View):
+class VerificationActions(discord.ui.View):
     def __init__(self, service):
         super().__init__(timeout=None)
         self.service = service
@@ -124,20 +124,38 @@ class VerificationView(discord.ui.View):
             self.service.busy.discard(user_id)
 
 
-def verification_embed(guild):
-    embed = discord.Embed(title='RIVER CITY ROLEPLAY • VERIFICATION', colour=0x1066EC,
-        description='Welcome to River City Roleplay! Link your Roblox account to unlock our community.\n\n'
-        '**01 — Link your account**\nPress **Verify with Roblox** and complete verification on Bloxlink. '
-        'Use your current Discord account and select **River City Roleplay**.\n\n'
-        '**02 — Confirm your verification**\nReturn here and press **Check Verification**. '
-        'We confirm your linked account before giving you the Community Member role.\n\n'
-        '**03 — Join the community**\nRead the rules, explore the channels, and join a session. '
-        'Use the same Roblox account when playing ER:LC.\n\n'
-        '**Need help?** Open a ticket in <#1572082489743249591>.')
-    if guild.icon:
-        embed.set_thumbnail(url=guild.icon.url)
-    embed.set_footer(text='River City Roleplay • Account linking powered by Bloxlink')
-    return embed
+class VerificationView(discord.ui.LayoutView):
+    def __init__(self, service, guild=None):
+        super().__init__(timeout=None)
+        actions = VerificationActions(service)
+        self.check = actions.check
+        row = discord.ui.ActionRow()
+        for button in list(actions.children):
+            actions.remove_item(button)
+            row.add_item(button)
+        intro = discord.ui.TextDisplay(
+            '## RIVER CITY ROLEPLAY | VERIFICATION\n'
+            'Welcome to River City Roleplay! Link your Roblox account to unlock our community.')
+        header = (discord.ui.Section(intro, accessory=discord.ui.Thumbnail(guild.icon.url))
+                  if guild and guild.icon else intro)
+        self.add_item(discord.ui.Container(
+            header, discord.ui.Separator(),
+            discord.ui.TextDisplay(
+                '**01 - Link your account**\nPress **Verify with Roblox** and complete linking on Bloxlink. '
+                'Use your current Discord account and select **River City Roleplay**.\n\n'
+                '**02 - Confirm your verification**\nReturn here and press **Check Verification**. '
+                'We confirm your linked account before granting Community Member.\n\n'
+                '**03 - Join the community**\nRead the rules and join a session using your linked Roblox account. '
+                'Stay connected to a voice channel while in game.\n\n'
+                '**Need help?** Open a ticket in <#1572082489743249591>.'),
+            row, discord.ui.Separator(),
+            discord.ui.TextDisplay('-# River City Roleplay | Account linking powered by Bloxlink'),
+            accent_colour=0x1066EC))
+
+
+def is_verification_panel(message):
+    return any(getattr(item, 'custom_id', None) == 'rc:verification:check'
+               for item in discord.ui.LayoutView.from_message(message).walk_children())
 
 
 class Verification(commands.Cog):
@@ -148,6 +166,7 @@ class Verification(commands.Cog):
         self.cooldowns = {}
         self.panel_lock = asyncio.Lock()
         self.checked_connection = False
+        self.upgrade_task = None
         bot.add_view(VerificationView(self))
 
     @commands.Cog.listener()
@@ -157,6 +176,8 @@ class Verification(commands.Cog):
         guild = self.bot.get_guild(GUILD)
         if not guild:
             return
+        if self.upgrade_task is None:
+            self.upgrade_task = asyncio.create_task(self.upgrade_panels(guild))
         try:
             roles_for(guild)
             account = await self.accounts.lookup(guild.owner_id)
@@ -191,16 +212,22 @@ class Verification(commands.Cog):
                 except discord.HTTPException:
                     await ctx.send('Channel setup could not finish. Check Manage Channels/Manage Roles and run `.verify lock` again. Some channels may already be gated.')
                     return
-            view = VerificationView(self)
+            view = VerificationView(self, ctx.guild)
             async for message in ctx.channel.history(limit=100):
-                if message.author.id == ctx.bot.user.id and any(
-                    getattr(item, 'custom_id', None) == 'rc:verification:check'
-                    for row in message.components for item in getattr(row, 'children', [])
-                ):
-                    await message.edit(embed=verification_embed(ctx.guild), view=view)
+                if message.author.id == ctx.bot.user.id and is_verification_panel(message):
+                    await message.edit(content=None, embeds=[], view=view)
                     return
-            await ctx.send(embed=verification_embed(ctx.guild), view=view,
-                           allowed_mentions=discord.AllowedMentions.none())
+            await ctx.send(view=view, allowed_mentions=discord.AllowedMentions.none())
+
+    async def upgrade_panels(self, guild):
+        for channel in guild.text_channels:
+            try:
+                async for message in channel.history(limit=100):
+                    if message.author.id == self.bot.user.id and is_verification_panel(message):
+                        await message.edit(content=None, embeds=[], view=VerificationView(self, guild))
+                        log.info('Upgraded verification panel to Components V2 in %s', channel.id)
+            except discord.HTTPException:
+                continue
 
     async def gate(self, ctx):
         pending, verified = roles_for(ctx.guild)

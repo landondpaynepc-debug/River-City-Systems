@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 from panels import ASSETS, Panel, SUPPORT_TYPES
 from sessions import Sessions, community_role, session_card, stats, welcome
 from verification import Verification, JOIN_ROLE
+from voice_guard import VoiceGuard
 
 load_dotenv(Path(__file__).with_name(".env"))
 
@@ -62,6 +63,7 @@ class RiverBot(commands.Bot):
     async def setup_hook(self):
         await self.add_cog(Sessions(DASHBOARD, self))
         await self.add_cog(Verification(self))
+        await self.add_cog(VoiceGuard(self))
         self.add_view(session_card("ssv", None))
         self.add_view(session_card("info", None, numbers="Loading counts…"))
         self.add_view(build_panel(PANEL))
