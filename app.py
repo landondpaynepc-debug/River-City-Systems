@@ -287,7 +287,7 @@ def build_panel(channel_id):
 
 async def ensure_panel(channel):
     kind = "dashboard" if channel.id == DASHBOARD else "assistance"
-    markers = {"rc:rules:v2"} if kind == "dashboard" else {"rc:desk:v2", "rc:open"}
+    markers = {"rc:rules:v2", "rc:rules:v3"} if kind == "dashboard" else {"rc:desk:v2", "rc:open"}
     async with panel_lock:
         previous = None
         async for message in channel.history(limit=None):
@@ -334,7 +334,8 @@ async def on_ready():
             log.error("Panel channel %s is unavailable", ident)
             continue
         try:
-            await ensure_panel(channel)
+            published = await ensure_panel(channel)
+            log.info("Panel ready in channel %s (message %s)", channel.id, published.id)
         except discord.HTTPException:
             log.exception("Could not publish panel in %s", ident)
 
