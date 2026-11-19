@@ -1,5 +1,6 @@
 """River City ER:LC session announcements and member voting."""
 import asyncio
+from discord_logs import MOD_LOG
 import logging
 import os
 import re
@@ -444,10 +445,10 @@ class GameLogger:
                     data = await response.json()
             if not isinstance(data, dict):
                 return
-            jail_channel = guild.get_channel(1572425299818450954)
+            jail_channel = guild.get_channel(MOD_LOG)
             for event in game_events(data):
                 await self.deliver(channel, event)
-                if event[2] == 'CommandLogs' and re.match(r'^:jail(?:\s|$)', str(event[3].get('Command', '')), re.I):
+                if event[2] == 'CommandLogs' and re.match(r'^:(?:jail|unjail|free|kick|ban|unban|warn)(?:\s|$)', str(event[3].get('Command', '')), re.I):
                     if jail_channel:
                         await self.deliver(jail_channel, event)
         except (aiohttp.ClientError, asyncio.TimeoutError, discord.HTTPException, ValueError, TypeError, OverflowError):

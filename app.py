@@ -16,6 +16,7 @@ from sessions import Sessions, community_role, has_staff_role, session_card, sta
 from verification import Verification, JOIN_ROLE
 from whitelisted import DepartmentPanel
 from voice_guard import VoiceGuard
+from discord_logs import DiscordLogs, MOD_LOG, post_log
 
 load_dotenv(Path(__file__).with_name(".env"))
 
@@ -67,6 +68,7 @@ class RiverBot(commands.Bot):
         await self.add_cog(Sessions(DASHBOARD, self))
         await self.add_cog(Verification(self))
         await self.add_cog(VoiceGuard(self))
+        await self.add_cog(DiscordLogs(self, GUILD))
         self.add_view(session_card("ssv", None))
         self.add_view(session_card("info", None, numbers="Loading counts…"))
         self.add_view(build_panel(PANEL))
@@ -389,7 +391,13 @@ def check_target(ctx, member):
 
 
 def audit(ctx, reason):
-    return f"{ctx.author} ({ctx.author.id}): {reason}"[:512]
+    return f"RC mod | {ctx.author} ({ctx.author.id}): {reason}"[:512]
+
+
+async def log_command(ctx, target, reason):
+    await post_log(ctx.guild, MOD_LOG, ctx.command.name.title(),
+                   f"Moderator: {ctx.author} ({ctx.author.id})\nTarget: {target}\nReason: {reason}",
+                   nonce=str(ctx.message.id))
 
 
 @bot.command()
@@ -397,6 +405,7 @@ def audit(ctx, reason):
 async def kick(ctx, member: discord.Member, *, reason="No reason provided"):
     check_target(ctx, member)
     await member.kick(reason=audit(ctx, reason))
+    await log_command(ctx, f"{member} ({member.id})", reason)
     await ctx.send(f"Kicked **{member}**.")
 
 
@@ -405,6 +414,7 @@ async def kick(ctx, member: discord.Member, *, reason="No reason provided"):
 async def ban(ctx, member: discord.Member, *, reason="No reason provided"):
     check_target(ctx, member)
     await member.ban(reason=audit(ctx, reason), delete_message_seconds=0)
+    await log_command(ctx, f"{member} ({member.id})", reason)
     await ctx.send(f"Banned **{member}**.")
 
 
@@ -412,6 +422,7 @@ async def ban(ctx, member: discord.Member, *, reason="No reason provided"):
 @commands.has_guild_permissions(ban_members=True)
 async def unban(ctx, user_id: int, *, reason="No reason provided"):
     await ctx.guild.unban(discord.Object(id=user_id), reason=audit(ctx, reason))
+    await log_command(ctx, user_id, reason)
     await ctx.send(f"Unbanned user {user_id}.")
 
 
@@ -420,6 +431,7 @@ async def unban(ctx, user_id: int, *, reason="No reason provided"):
 async def timeout(ctx, member: discord.Member, minutes: commands.Range[int, 1, 40320], *, reason="No reason provided"):
     check_target(ctx, member)
     await member.timeout(timedelta(minutes=minutes), reason=audit(ctx, reason))
+    await log_command(ctx, f"{member} ({member.id})", f"{minutes} minutes | {reason}")
     await ctx.send(f"Timed out **{member}** for {minutes} minutes.")
 
 
@@ -428,6 +440,7 @@ async def timeout(ctx, member: discord.Member, minutes: commands.Range[int, 1, 4
 async def untimeout(ctx, member: discord.Member, *, reason="No reason provided"):
     check_target(ctx, member)
     await member.timeout(None, reason=audit(ctx, reason))
+    await log_command(ctx, f"{member} ({member.id})", reason)
     await ctx.send(f"Removed the timeout for **{member}**.")
 
 
@@ -435,6 +448,7 @@ async def untimeout(ctx, member: discord.Member, *, reason="No reason provided")
 @commands.has_permissions(manage_messages=True)
 async def clear(ctx, amount: commands.Range[int, 1, 100]):
     deleted = await ctx.channel.purge(limit=amount, before=ctx.message)
+    await log_command(ctx, ctx.channel.mention, f"Cleared {len(deleted)} messages")
     await ctx.message.delete()
     await ctx.send(f"Cleared {len(deleted)} messages.", delete_after=5)
 
