@@ -98,7 +98,7 @@ class RequestForm(ui.Modal):
 
 class RulesMenu(ui.Select):
     def __init__(self):
-        super().__init__(custom_id="rc:rules:v2", placeholder="View Rules & Regulations",
+        super().__init__(custom_id="rc:rules:v3", placeholder="View Rules & Regulations",
                          options=[discord.SelectOption(label=title) for title in RULES])
 
     async def callback(self, interaction):
@@ -109,8 +109,8 @@ class RulesMenu(ui.Select):
         }.get(title, title)
         embed = discord.Embed(title=heading, description=RULES[title])
         embed.set_footer(text=BRAND)
-        await interaction.response.edit_message(view=self.view)
-        await interaction.followup.send(embed=embed, ephemeral=True)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await interaction.message.edit(view=self.view)
 
 
 class RoleMenu(ui.Select):
