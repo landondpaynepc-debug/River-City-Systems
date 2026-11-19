@@ -9,7 +9,29 @@ from discord import ui
 BRAND = "River City Roleplay"
 ASSETS = Path(__file__).with_name("assets")
 RULES = {
-    "Discord Regulations": "**Respect other members**\nDiscuss the scene or the decision without attacking the person behind it. Slurs, harassment, threats, and repeated unwanted DMs can be reported to the assistance desk.\n\n**Use the right channel**\nKeep session coordination in the sessions channel and reports in a private ticket. Ask once, give staff time to respond, and avoid repeated mentions or mass pings.\n\n**Protect private information**\nKeep real names, contact details, and private conversations out of public chat. When submitting evidence, crop unrelated messages and identify the time, channel, and people involved.\n\n**Resolve disagreements**\nIf staff pause a scene, follow their direction and let other players continue. Open a ticket afterward with the relevant message link or clip. Use High Rank Support for sensitive staff concerns.",
+    "Discord Regulations": """Welcome to **River City Roleplay (RCRP)**! These rules apply to everyone in our Discord, including staff and department members.
+
+**1. Respect other members.** Treat people with respect in chat, voice calls, and tickets. Harassment, slurs, threats, and targeting someone because of who they are are prohibited.
+
+**2. Keep content appropriate.** Keep your messages, uploads, profile, and server nickname appropriate for the community. Sexually explicit content, graphic violence, and shock media are prohibited.
+
+**3. Use the right channels.** Follow channel topics and check pinned messages before posting. Use the support ticket system for reports, appeals, and questions that need staff attention.
+
+**4. Avoid spam and disruptive pings.** Give others room to chat. Flooding channels, repeating the same request, and repeatedly tagging staff or departments are prohibited.
+
+**5. Be considerate in voice chat.** Let others speak and keep your mic at a reasonable volume. Soundboard spam, mic blasting, and deliberately talking over session hosts disrupt everyone.
+
+**6. Ask before advertising.** Get staff approval before promoting a Discord server, business, social account, or paid service. This includes unsolicited promotional DMs to RCRP members.
+
+**7. Protect people’s privacy.** Keep personal information private. Sharing someone’s address, phone number, or private messages without permission is prohibited. If a private message is evidence for a report, send it to staff through a ticket.
+
+**8. Keep roleplay fair.** Keep in-character disputes out of community chat. Using Discord to pass along information your character couldn’t know, such as a suspect’s location during a pursuit, counts as metagaming.
+
+**9. Respect department access.** Use department channels and resources only as authorized. Impersonating staff, claiming a rank you haven’t earned, or sharing restricted material outside your department is prohibited.
+
+**10. Handle moderation through tickets.** Follow staff directions during a session. If you disagree with a decision, open a ticket, explain what happened, and include any relevant evidence. Using alternate accounts to bypass a timeout or ban is prohibited.
+
+All members must also follow Discord’s Terms of Service and Community Guidelines. Depending on the severity and history of a violation, staff may issue a warning, timeout, kick, or ban.""",
     "In-Game Regulations": "**Start scenes fairly**\nGive other players a reason to engage and time to react. Establish what your character can actually see or hear. Information learned from a stream, Discord call, or player list stays out of the scene.\n\n**Play consequences**\nRoleplay collisions, injuries, arrests, and vehicle damage. A character who has just crashed should give responders a chance to assess the scene before driving away.\n\n**Keep control of your character**\nDescribe your own actions and let others decide their reactions. Avoid forcing outcomes, using glitches, resetting to escape detention, or returning immediately to a scene after your character has died.\n\n**Respect scene boundaries**\nGive active calls space. Ask the host before staging a large event or entering a restricted department scene. If a dispute stops play, note the time and use the assistance desk so the session can continue.",
     "Banned Vehicles & Items": "**Check session restrictions**\nRead the host’s briefing before spawning special vehicles or equipment. Restrictions can change with the department, event, or training scenario. Ask about the exact model when its status is unclear.\n\n**Match the vehicle to your role**\nUse a department vehicle only when authorized to act for that department. Emergency lights, liveries, and equipment should match the assignment you are playing.\n\n**Keep scenes accessible**\nPark clear of spawn points, station exits, and active scenes. Avoid using vehicles or props to obstruct other players outside an agreed roleplay scenario.\n\n**Request a ruling**\nGive General Support the vehicle name, intended use, and session. Wait for a host decision on disputed equipment. If asked to switch, safely pull over and choose an approved alternative.",
     "Booster Vehicles": "**Confirm eligibility**\nBefore spawning a booster vehicle, confirm your booster role and ask the host which models are available for this session. A vehicle purchased in Roblox can still have a server-side restriction.\n\n**Use the approved setup**\nKeep the model, livery, and equipment consistent with the approval. Department markings and emergency equipment require separate department authorization.\n\n**Drive for the scene**\nUse roads, speeds, and parking appropriate to the scenario. Give emergency scenes room and roleplay collisions or damage just as you would in any other vehicle.\n\n**When access changes**\nIf your booster role disappears or a host updates the list, switch vehicles at a safe stopping point. For an access check, send General Support your Roblox username and the vehicle name.",
@@ -57,7 +79,8 @@ class RulesMenu(ui.Select):
 
     async def callback(self, interaction):
         title = self.values[0]
-        embed = discord.Embed(title=title, description=RULES[title])
+        heading = "River City Roleplay | Discord Rules" if title == "Discord Regulations" else title
+        embed = discord.Embed(title=heading, description=RULES[title])
         embed.set_footer(text=BRAND)
         await interaction.response.edit_message(view=self.view)
         await interaction.followup.send(embed=embed, ephemeral=True)
