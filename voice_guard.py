@@ -66,6 +66,13 @@ class VoiceGuard(commands.Cog):
         # Never punish based on voice observations spanning a lost Gateway connection.
         self.missing.clear()
 
+    @commands.Cog.listener()
+    async def on_voice_state_update(self, member, before, after):
+        if member.guild.id == GUILD and after.channel and before.channel != after.channel:
+            for rid, (_, discord_id) in list(self.links.items()):
+                if discord_id == member.id:
+                    self.missing.pop(rid, None)
+
     async def api(self, path, params=None, command=None):
         key = os.getenv('ERLC_SERVER_KEY', '')
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=12)) as client:
@@ -73,9 +80,11 @@ class VoiceGuard(commands.Cog):
             kwargs = {'json': {'command': command}} if command else {'params': params}
             async with method('https://api.erlc.gg/v2/server' + path,
                               headers={'Server-Key': key}, allow_redirects=False, **kwargs) as response:
-                if response.status != 200:
+                if not 200 <= response.status < 300:
                     self.backoff = time.monotonic() + (60 if response.status == 429 else 15)
                     raise VerificationUnavailable(f'ERLC HTTP {response.status}')
+                if command:
+                    return
                 return await response.json()
 
     async def linked_member(self, guild, roblox_id):
@@ -94,7 +103,7 @@ class VoiceGuard(commands.Cog):
                     self.backoff = time.monotonic() + 60
                     raise VerificationUnavailable(f'Bloxlink reverse lookup HTTP {response.status}')
                 data = await response.json()
-        ids = data.get('discordIDs')
+        ids = data.get('discordIDs', data.get('DiscordIDs'))
         if not isinstance(ids, list):
             raise VerificationUnavailable('Bloxlink reverse lookup returned an unexpected schema')
         ids = {int(n) for n in ids if str(n).isdecimal()}
@@ -152,7 +161,12 @@ class VoiceGuard(commands.Cog):
         if not self.bot.is_ready() or time.monotonic() < self.backoff:
             return
         guild = self.bot.get_guild(GUILD)
-        if not guild or not self.bot.intents.voice_states or not os.getenv('BLOXLINK_API_KEY') or not os.getenv('ERLC_SERVER_KEY'):
+        if not guild or not self.bot.intents.voice_states:
+            return
+        missing_keys = [name for name in ('BLOXLINK_API_KEY', 'ERLC_SERVER_KEY') if not os.getenv(name)]
+        if missing_keys:
+            log.warning('Voice checks require %s', ', '.join(missing_keys))
+            self.backoff = time.monotonic() + 300
             return
         channel = guild.get_channel(MOD_LOG)
         if not channel:

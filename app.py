@@ -15,6 +15,7 @@ from panels import ASSETS, Panel, SUPPORT_TYPES
 from sessions import Sessions, community_role, has_staff_role, session_card, stats, welcome
 from verification import Verification, JOIN_ROLE
 from whitelisted import DepartmentPanel
+from game_hints import GameHints
 from voice_guard import VoiceGuard
 from discord_logs import DiscordLogs, MOD_LOG, post_log
 
@@ -68,6 +69,7 @@ class RiverBot(commands.Bot):
         await self.add_cog(Sessions(DASHBOARD, self))
         await self.add_cog(Verification(self))
         await self.add_cog(VoiceGuard(self))
+        await self.add_cog(GameHints(self, GUILD))
         await self.add_cog(DiscordLogs(self, GUILD))
         self.add_view(session_card("ssv", None))
         self.add_view(session_card("info", None, numbers="Loading counts…"))
