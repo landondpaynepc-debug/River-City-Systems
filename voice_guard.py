@@ -13,7 +13,7 @@ import discord
 from discord.ext import commands, tasks
 from verification import GUILD, VerificationUnavailable
 
-LOG_CHANNEL = 1572425299818450954
+from discord_logs import MOD_LOG
 GRACE = 60
 DURATION = 300
 PREFIX = 'rc-vc-state:'
@@ -139,12 +139,13 @@ class VoiceGuard(commands.Cog):
                         f"**Reason:** In game without a Discord voice connection after {GRACE} seconds.\n"
                         f"**Jail duration:** 5 minutes\n**Release due:** <t:{int(row['due'])}:R>")
         embed.set_footer(text='River City Roleplay | Automatic VC enforcement')
-        if row.get('audit'):
+        if row.get('audit') and row.get('audit_channel') == channel.id:
             await channel.get_partial_message(row['audit']).edit(embed=embed)
         else:
             sent = await channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none(),
                                       nonce=hashlib.sha256(str(row['nonce']).encode()).hexdigest()[:24])
             row['audit'] = sent.id
+            row['audit_channel'] = channel.id
 
     @tasks.loop(seconds=10)
     async def poll(self):
@@ -153,7 +154,7 @@ class VoiceGuard(commands.Cog):
         guild = self.bot.get_guild(GUILD)
         if not guild or not self.bot.intents.voice_states or not os.getenv('BLOXLINK_API_KEY') or not os.getenv('ERLC_SERVER_KEY'):
             return
-        channel = guild.get_channel(LOG_CHANNEL)
+        channel = guild.get_channel(MOD_LOG)
         if not channel:
             log.warning('Auto-jail paused: jail log channel unavailable')
             return
