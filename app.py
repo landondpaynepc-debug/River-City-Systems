@@ -15,6 +15,9 @@ from panels import ASSETS, Panel, SUPPORT_TYPES
 from sessions import Sessions, community_role, has_staff_role, session_card, stats, welcome
 from verification import Verification, JOIN_ROLE
 from whitelisted import DepartmentPanel
+from staff_desk import StaffDesk, CallView
+from community_shop import CommunityShop, Purchase
+from waiting_room import WaitingRoom
 from voice_guard import VoiceGuard
 from discord_logs import DiscordLogs, MOD_LOG, post_log
 
@@ -68,6 +71,12 @@ class RiverBot(commands.Bot):
         await self.add_cog(Sessions(DASHBOARD, self))
         await self.add_cog(Verification(self))
         await self.add_cog(VoiceGuard(self))
+        staff_service = StaffDesk(self)
+        await self.add_cog(staff_service)
+        self.add_view(CallView(staff_service))
+        await self.add_cog(CommunityShop(self))
+        self.add_view(Purchase(self))
+        await self.add_cog(WaitingRoom(self))
         await self.add_cog(DiscordLogs(self, GUILD))
         self.add_view(session_card("ssv", None))
         self.add_view(session_card("info", None, numbers="Loading counts…"))
@@ -456,7 +465,7 @@ async def clear(ctx, amount: commands.Range[int, 1, 100]):
 @bot.command(name="cmds", aliases=["help", "commands"])
 async def show_help(ctx):
     session_help = "**Sessions**\n`.ssv` vote · `.ssu` startup · `.ssd` shutdown\n`.serverinfo` live ER:LC counts"
-    await ctx.send(embed=card("River City Roleplay", f"{session_help}\n\n**Command list** · `.cmds`, `.commands`, `.help`\n**Member assistance** · <#{PANEL}>\n\n**Staff commands**\n`.kick @member [reason]`\n`.ban @member [reason]`\n`.unban user_id [reason]`\n`.timeout @member minutes [reason]`\n`.untimeout @member [reason]`\n`.clear 1–100`\n`.whitelisted` - post the department directory (Staff role)\n`.ticketpanel`\n`.dashboard`\n`.verify` - verification panel\n`.verify lock` - configure verified access (Manage Server)"))
+    await ctx.send(embed=card("River City Roleplay", f"{session_help}\n\n**Command list** · `.cmds`, `.commands`, `.help`\n**Member assistance** · <#{PANEL}> · `.staffcall <reason>` · `.mylogs`\n**Staff desk** · `.shift start|break|resume|end|status` · `.points` · `.redeem staff|department <name>|roblox`\n**Shop management** · `.setperks 1–4 <perk list>`\n**Staff records** · `.promote @member @role reason` · `.demote @member @role reason` · `.infraction @member reason` · `.memberlog @member note` · `.logs @member`\n\n**Staff commands**\n`.kick @member [reason]`\n`.ban @member [reason]`\n`.unban user_id [reason]`\n`.timeout @member minutes [reason]`\n`.untimeout @member [reason]`\n`.clear 1–100`\n`.whitelisted` - post the department directory (Staff role)\n`.ticketpanel`\n`.dashboard`\n`.verify` - verification panel\n`.verify lock` - configure verified access (Manage Server)"))
 
 
 @bot.event

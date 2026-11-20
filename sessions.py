@@ -417,6 +417,8 @@ class GameLogger:
         await channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none(),
                            nonce=digest, silent=True)
         self.seen[channel.id].add(digest)
+        if kind == 'ModCalls' and row.get('Timestamp') and row.get('Moderator'):
+            self.bot.dispatch('river_mod_call', channel.guild, row)
 
     @tasks.loop(seconds=30)
     async def poll(self):
