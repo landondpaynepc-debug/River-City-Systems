@@ -7,6 +7,7 @@ import aiohttp
 import discord
 from discord.ext import commands, tasks
 
+from staff_desk import staff
 from verification import GUILD, VerificationUnavailable
 
 SHOP = 1572082475520499712
@@ -128,7 +129,24 @@ class CommunityShop(commands.Cog):
         async with self.panel_lock:
             await self.publish()
 
-    async def publish(self):
+    @commands.command()
+    async def shop(self, ctx):
+        await self.publish_command(ctx, SHOP)
+
+    @commands.command()
+    async def perks(self, ctx):
+        await self.publish_command(ctx, PERKS)
+
+    async def publish_command(self, ctx, destination):
+        if not ctx.guild or ctx.guild.id != GUILD or not staff(ctx.author):
+            return await ctx.send("Only River City staff can publish this panel.")
+        async with self.panel_lock:
+            message = await self.publish(destination)
+        if message is None:
+            return await ctx.send(f"Could not publish in <#{destination}>. Check the bot’s channel permissions.")
+        await ctx.send(f"Panel ready: {message.jump_url}", delete_after=15)
+
+    async def publish(self, destination=None):
         guild = self.bot.get_guild(GUILD)
         if not guild:
             return
@@ -155,6 +173,8 @@ class CommunityShop(commands.Cog):
         perks.add_field(name="Claim rules", value=CLAIM_RULES, inline=False)
         shop.add_field(name="What's included?", value=f"See all four tiers in <#{PERKS}>.", inline=False)
         for cid, embed, marker in ((SHOP, shop, "rc-shop"), (PERKS, perks, "rc-perks")):
+            if destination is not None and cid != destination:
+                continue
             channel = guild.get_channel(cid)
             if channel is None:
                 continue
@@ -168,7 +188,7 @@ class CommunityShop(commands.Cog):
                 view = Purchase(self.bot) if cid == SHOP else None
                 banner = "shop.webp" if cid == SHOP else "perks.webp"
                 panel = layout(embed, controls=view, banner=banner)
-                if existing and existing.flags.components_v2:
+                if destination is None and existing and existing.flags.components_v2:
                     # Compare persisted text independently of Discord-generated media URLs.
                     if (any(a.filename == banner for a in existing.attachments)
                         and text_parts(existing, BODY) == ([embed.description] if embed.description else [])
@@ -178,11 +198,13 @@ class CommunityShop(commands.Cog):
                 art = discord.File(Path(__file__).with_name("assets") / banner, filename=banner)
                 try:
                     if existing:
-                        await existing.edit(content=None, embeds=[], attachments=[art], view=panel)
+                        message = await existing.edit(content=None, embeds=[], attachments=[art], view=panel)
                     else:
-                        await channel.send(file=art, view=panel, nonce=marker)
+                        message = await channel.send(file=art, view=panel, nonce=marker)
                 finally:
                     art.close()
+                if destination is not None:
+                    return message
             except discord.HTTPException:
                 log.exception("Could not publish panel in %s", cid)
 
