@@ -1,3 +1,4 @@
+from cards import layout, read_card, footer
 import asyncio
 import hashlib
 import json
@@ -36,13 +37,15 @@ class CallView(discord.ui.View):
         key = f"call:{interaction.message.id}"
         async with self.service.lock:
             await self.service.load(interaction.guild)
-            if interaction.message.embeds[0].footer.text == f"Caller {interaction.user.id}":
+            if footer(interaction.message) == f"Caller {interaction.user.id}":
                 return await interaction.followup.send("Another staff member must respond.", ephemeral=True)
             row = await self.service.record(key, interaction.user.id, "point", "Staff call response")
-        embed = interaction.message.embeds[0]
+        embed = read_card(interaction.message)
+        embed.clear_fields()
+        embed.set_footer(text=footer(interaction.message))
         embed.title = "Staff call answered"
-        embed.set_field_at(0, name="Responding staff", value=f"<@{row['user']}>")
-        await interaction.message.edit(embed=embed, view=None)
+        embed.add_field(name="Responding staff", value=f"<@{row['user']}>")
+        await interaction.message.edit(content=None, embeds=[], view=layout(embed))
         await interaction.followup.send(f"Response credited to <@{row['user']}>.", ephemeral=True)
 
 
@@ -118,7 +121,7 @@ class StaffDesk(commands.Cog):
         room = ctx.guild.get_channel(MOD_LOG)
         if room is None:
             raise commands.BadArgument("The staff log channel is unavailable.")
-        await room.send(embed=embed, view=CallView(self))
+        await room.send(view=layout(embed, controls=CallView(self)))
         await ctx.reply("Your call has been sent to staff.", mention_author=False)
 
     @commands.command()

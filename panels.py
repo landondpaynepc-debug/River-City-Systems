@@ -1,3 +1,4 @@
+from cards import layout
 """Discord dashboard and assistance panels for River City Roleplay."""
 import asyncio
 import os
@@ -109,7 +110,7 @@ class RulesMenu(ui.Select):
         }.get(title, title)
         embed = discord.Embed(title=heading, description=RULES[title])
         embed.set_footer(text=BRAND)
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await interaction.response.send_message(view=layout(embed), ephemeral=True)
         await interaction.message.edit(view=self.view)
 
 

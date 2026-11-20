@@ -1,3 +1,4 @@
+from cards import layout, footer
 """River City ER:LC session announcements and member voting."""
 import asyncio
 from discord_logs import MOD_LOG
@@ -389,10 +390,9 @@ class GameLogger:
         seen = set()
         async for message in channel.history(limit=None, after=cutoff):
             if message.author.id == self.bot.user.id:
-                for embed in message.embeds:
-                    footer = embed.footer.text or ''
-                    if footer.startswith('RC event '):
-                        seen.add(footer.removeprefix('RC event '))
+                marker = footer(message)
+                if marker.startswith('RC event '):
+                    seen.add(marker.removeprefix('RC event '))
         self.seen[channel.id] = seen
         self.floors[channel.id] = cutoff.timestamp() if seen else time.time() - 300
         self.restored.add(channel.id)
@@ -414,7 +414,7 @@ class GameLogger:
                 if len(embed.fields) >= 5:
                     break
         embed.set_footer(text=f'RC event {digest}')
-        await channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none(),
+        await channel.send(view=layout(embed), allowed_mentions=discord.AllowedMentions.none(),
                            nonce=digest, silent=True)
         self.seen[channel.id].add(digest)
         if kind == 'ModCalls' and row.get('Timestamp') and row.get('Moderator'):

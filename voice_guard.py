@@ -1,3 +1,4 @@
+from cards import layout
 """Voice-required ERLC moderation with durable Discord receipts."""
 import asyncio
 import hashlib
@@ -149,9 +150,9 @@ class VoiceGuard(commands.Cog):
                         f"**Jail duration:** 5 minutes\n**Release due:** <t:{int(row['due'])}:R>")
         embed.set_footer(text='River City Roleplay | Automatic VC enforcement')
         if row.get('audit') and row.get('audit_channel') == channel.id:
-            await channel.get_partial_message(row['audit']).edit(embed=embed)
+            await channel.get_partial_message(row['audit']).edit(content=None, embeds=[], view=layout(embed))
         else:
-            sent = await channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none(),
+            sent = await channel.send(view=layout(embed), allowed_mentions=discord.AllowedMentions.none(),
                                       nonce=hashlib.sha256(str(row['nonce']).encode()).hexdigest()[:24])
             row['audit'] = sent.id
             row['audit_channel'] = channel.id

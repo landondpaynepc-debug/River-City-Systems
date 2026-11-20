@@ -1,3 +1,4 @@
+from cards import layout
 import logging
 
 import discord
@@ -21,7 +22,7 @@ async def post_log(guild, destination, title, details, *, nonce=None):
         return
     embed = discord.Embed(title=title, description=details[:4096], timestamp=discord.utils.utcnow())
     try:
-        await channel.send(embed=embed, nonce=nonce, allowed_mentions=discord.AllowedMentions.none())
+        await channel.send(view=layout(embed), nonce=nonce, allowed_mentions=discord.AllowedMentions.none())
     except discord.HTTPException:
         log.exception("Could not send %s to %s", title, destination)
 
