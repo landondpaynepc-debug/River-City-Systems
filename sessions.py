@@ -214,14 +214,12 @@ async def publish(ctx, kind, **kwargs):
             file.close()
 
 
-def host():
-    async def allowed(ctx):
-        role_id = int(os.getenv("SESSION_HOST_ROLE_ID") or 0)
-        return ctx.author.guild_permissions.manage_guild or (role_id and ctx.author.get_role(role_id))
-    return commands.check(allowed)
-
-
 class Sessions(commands.Cog):
+    async def cog_check(self, ctx):
+        if not has_staff_role(ctx.author):
+            raise commands.BadArgument("Only members with the Staff role can use session commands.")
+        return True
+
     def __init__(self, dashboard, bot):
         self.dashboard = dashboard
         self.bot = bot
@@ -273,7 +271,6 @@ class Sessions(commands.Cog):
 
 
     @commands.command()
-    @host()
     async def ssv(self, ctx):
         async with lock:
             previous = await latest(ctx.channel, ctx.bot.user.id)
@@ -283,7 +280,6 @@ class Sessions(commands.Cog):
             await publish(ctx, "ssv")
 
     @commands.command()
-    @host()
     async def ssu(self, ctx):
         async with lock:
             previous = await latest(ctx.channel, ctx.bot.user.id)
@@ -307,7 +303,6 @@ class Sessions(commands.Cog):
                 await ctx.send("Startup posted. Set COMMUNITY_MEMBER_ROLE_ID to enable the community role ping.")
 
     @commands.command()
-    @host()
     async def ssd(self, ctx):
         async with lock:
             previous = await latest(ctx.channel, ctx.bot.user.id)
@@ -319,9 +314,6 @@ class Sessions(commands.Cog):
     @commands.command()
     @commands.cooldown(1, 10, commands.BucketType.user)
     async def serverinfo(self, ctx):
-        if not has_staff_role(ctx.author):
-            await ctx.send("Only members with the Staff role can use .serverinfo.")
-            return
         async with lock:
             numbers = await stats()
             previous = self.live_messages.get(ctx.channel.id)
