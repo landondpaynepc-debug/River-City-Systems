@@ -2,6 +2,9 @@ import asyncio
 import ctypes
 import logging
 import os
+import struct
+import subprocess
+import sys
 import tempfile
 import wave
 from pathlib import Path
@@ -44,6 +47,56 @@ def speak_to_file(text, filename):
             output.writeframes(b"".join(samples))
     finally:
         lib.espeak_Terminate()
+
+
+class GreetingAudio(discord.AudioSource):
+    def __init__(self, packets):
+        self.packets = iter(packets)
+
+    def read(self):
+        return next(self.packets, b"")
+
+    def is_opus(self):
+        return True
+
+
+def backup_audio():
+    data = (Path(__file__).with_name("assets") / "waiting-room.dca").read_bytes()
+    packets = []
+    offset = 0
+    while offset < len(data):
+        size, = struct.unpack_from("<H", data, offset)
+        offset += 2
+        if not size or offset + size > len(data):
+            raise ValueError("Invalid greeting packet")
+        packets.append(data[offset:offset + size])
+        offset += size
+    return GreetingAudio(packets)
+
+
+def prepare_audio(greeting):
+    try:
+        import imageio_ffmpeg
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "greeting.wav"
+            # Keep native voice-engine stalls or crashes outside the gateway process.
+            subprocess.run([sys.executable, __file__, str(path)], input=greeting.encode(),
+                           check=True, timeout=8, stdout=subprocess.DEVNULL)
+            with wave.open(str(path)) as audio:
+                pcm = audio.readframes(audio.getnframes())
+                if not any(pcm) or audio.getnframes() < audio.getframerate() // 2:
+                    raise ValueError("Speech engine produced no audible greeting")
+            source = discord.FFmpegOpusAudio(str(path), executable=imageio_ffmpeg.get_ffmpeg_exe())
+            try:
+                packets = [p for p in iter(source.read, b"") if not p.startswith((b"OpusHead", b"OpusTags"))]
+            finally:
+                source.cleanup()
+            if len(packets) < 25:
+                raise ValueError("Encoder produced no playable greeting")
+            return GreetingAudio(packets)
+    except Exception:
+        log.exception("Personalized greeting unavailable. Playing bundled voice clip.")
+        return backup_audio()
 
 
 class WaitingRoom(commands.Cog):
@@ -90,29 +143,38 @@ class WaitingRoom(commands.Cog):
             if not member.voice or member.voice.channel != room:
                 return
             try:
-                import imageio_ffmpeg
+                me = room.guild.me
+                permissions = room.permissions_for(me)
+                if not permissions.connect or not permissions.speak:
+                    raise RuntimeError("The bot needs Connect and Speak in the waiting room")
                 vc = await self.connection(room)
-                with tempfile.TemporaryDirectory() as folder:
-                    path = Path(folder) / "greeting.wav"
-                    await asyncio.to_thread(speak_to_file, greeting, path)
-                    source = discord.FFmpegOpusAudio(str(path), executable=imageio_ffmpeg.get_ffmpeg_exe())
-                    loop = asyncio.get_running_loop()
-                    done = loop.create_future()
+                if me.voice and (me.voice.mute or me.voice.suppress):
+                    raise RuntimeError("The bot is server-muted or suppressed in the waiting room")
+                source = await asyncio.to_thread(prepare_audio, greeting)
+                await asyncio.sleep(1)
+                if not member.voice or member.voice.channel != room:
+                    return
+                loop = asyncio.get_running_loop()
+                done = loop.create_future()
 
-                    def finish(error):
-                        if not done.done():
-                            if error:
-                                done.set_exception(error)
-                            else:
-                                done.set_result(None)
+                def finish(error):
+                    if not done.done():
+                        if error:
+                            done.set_exception(error)
+                        else:
+                            done.set_result(None)
 
-                    try:
-                        vc.play(source, after=lambda error: loop.call_soon_threadsafe(finish, error))
-                        await asyncio.wait_for(done, timeout=45)
-                    finally:
-                        if vc.is_playing():
-                            vc.stop()
-                        source.cleanup()
+                vc.play(source, after=lambda error: loop.call_soon_threadsafe(finish, error))
+                try:
+                    await asyncio.wait_for(done, timeout=45)
+                finally:
+                    if vc.is_playing():
+                        vc.stop()
+                log.info("Waiting room greeting playback completed in %s", ROOM)
             except Exception:
                 log.exception("Waiting room speech failed")
                 await room.send(greeting, allowed_mentions=discord.AllowedMentions.none())
+
+
+if __name__ == "__main__":
+    speak_to_file(sys.stdin.buffer.read().decode(), sys.argv[1])

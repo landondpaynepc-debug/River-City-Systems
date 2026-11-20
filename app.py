@@ -1,3 +1,4 @@
+from cards import layout, read_card, text_parts, FIELD
 import asyncio
 import logging
 import os
@@ -253,7 +254,7 @@ async def create_ticket(interaction, route, subject, details):
                 team = "management" if high else "the support team"
                 embed = card(SUPPORT_TYPES[route], f"{member.mention}, your request is open for {team} to review. Add any relevant screenshots or message links here. A staff member can claim the ticket below.\n\n**Subject**  {discord.utils.escape_markdown(subject)}\n\n{details}")
                 ping = role.mention if role and not use_thread else ""
-                await room.send(ping or None, embed=embed, view=Controls(),
+                await room.send(view=layout(embed, controls=Controls(), ping=ping),
                                 allowed_mentions=discord.AllowedMentions(roles=[role]) if ping else discord.AllowedMentions.none())
             except discord.HTTPException:
                 await room.delete(reason="Incomplete ticket setup")
@@ -274,13 +275,13 @@ class Controls(TicketView):
         await interaction.response.defer(ephemeral=True, thinking=True)
         async with ticket_lock:
             message = await interaction.channel.fetch_message(interaction.message.id)
-            embed = message.embeds[0]
-            if embed.fields:
+            embed = read_card(message)
+            if embed.fields or text_parts(message, FIELD):
                 await interaction.followup.send("This ticket has already been claimed.", ephemeral=True)
                 return
             embed.add_field(name="Claimed by", value=interaction.user.mention)
             embed.color = None
-            await message.edit(embed=embed)
+            await message.edit(content=None, embeds=[], view=layout(embed, controls=Controls()))
         await interaction.followup.send("You claimed this ticket.", ephemeral=True)
 
     @discord.ui.button(label="Close", style=discord.ButtonStyle.danger, custom_id="rc:close")
@@ -467,7 +468,7 @@ async def clear(ctx, amount: commands.Range[int, 1, 100]):
 @bot.command(name="cmds", aliases=["help", "commands"])
 async def show_help(ctx):
     session_help = "**Sessions**\n`.ssv` vote · `.ssu` startup · `.ssd` shutdown\n`.serverinfo` live ER:LC counts"
-    await ctx.send(embed=card("River City Roleplay", f"{session_help}\n\n**Command list** · `.cmds`, `.commands`, `.help`\n**Member assistance** · <#{PANEL}> · `.staffcall <reason>` · `.mylogs`\n**Staff desk** · `.shift start|break|resume|end|status` · `.points` · `.redeem staff|department <name>|roblox`\n**Shop management** · `.setperks 1–4 <perk list>`\n**Staff records** · `.promote @member @role reason` · `.demote @member @role reason` · `.infraction @member reason` · `.memberlog @member note` · `.logs @member`\n\n**Staff commands**\n`.kick @member [reason]`\n`.ban @member [reason]`\n`.unban user_id [reason]`\n`.timeout @member minutes [reason]`\n`.untimeout @member [reason]`\n`.clear 1–100`\n`.whitelisted` - post the department directory (Staff role)\n`.ticketpanel`\n`.dashboard`\n`.verify` - verification panel\n`.verify lock` - configure verified access (Manage Server)"))
+    await ctx.send(view=layout(card("River City Roleplay", f"{session_help}\n\n**Command list** · `.cmds`, `.commands`, `.help`\n**Member assistance** · <#{PANEL}> · `.staffcall <reason>` · `.mylogs`\n**Staff desk** · `.shift start|break|resume|end|status` · `.points` · `.redeem staff|department <name>|roblox`\n**Shop management** · `.setperks 1–4 <perk list>`\n**Staff records** · `.promote @member @role reason` · `.demote @member @role reason` · `.infraction @member reason` · `.memberlog @member note` · `.logs @member`\n\n**Staff commands**\n`.kick @member [reason]`\n`.ban @member [reason]`\n`.unban user_id [reason]`\n`.timeout @member minutes [reason]`\n`.untimeout @member [reason]`\n`.clear 1–100`\n`.whitelisted` - post the department directory (Staff role)\n`.ticketpanel`\n`.dashboard`\n`.verify` - verification panel\n`.verify lock` - configure verified access (Manage Server)")))
 
 
 @bot.event
