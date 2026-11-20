@@ -1,12 +1,6 @@
 import asyncio
-import ctypes
 import logging
-import os
-import struct
-import subprocess
-import sys
-import tempfile
-import wave
+from functools import lru_cache
 from pathlib import Path
 
 import discord
@@ -18,35 +12,19 @@ ROOM = 1573452372103929856
 log = logging.getLogger("rivercity.waiting")
 
 
-def speak_to_file(text, filename):
-    import espeakng_loader
-    lib = ctypes.CDLL(str(espeakng_loader.get_library_path()))
-    data = Path(espeakng_loader.get_data_path())
-    parent = data.parent if data.name == "espeak-ng-data" else data
-    rate = lib.espeak_Initialize(2, 0, os.fsencode(parent), 0)
-    if rate <= 0:
-        raise RuntimeError("Speech initialization failed")
-    samples = []
-    callback_type = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p)
+@lru_cache(maxsize=1)
+def recording_packets():
+    import imageio_ffmpeg
 
-    @callback_type
-    def capture(pointer, count, events):
-        if pointer and count:
-            samples.append(ctypes.string_at(pointer, count * 2))
-        return 0
-
+    path = Path(__file__).with_name("assets") / "waiting-room.m4a"
+    source = discord.FFmpegOpusAudio(str(path), executable=imageio_ffmpeg.get_ffmpeg_exe())
     try:
-        lib.espeak_SetSynthCallback(capture)
-        lib.espeak_SetVoiceByName(b"en-us")
-        payload = text.encode("utf-8") + b"\x00"
-        result = lib.espeak_Synth(payload, len(payload), 0, 1, 0, 1, None, None)
-        if result or not samples:
-            raise RuntimeError("Speech synthesis failed")
-        with wave.open(str(filename), "wb") as output:
-            output.setparams((1, 2, rate, 0, "NONE", "not compressed"))
-            output.writeframes(b"".join(samples))
+        packets = tuple(p for p in iter(source.read, b"") if not p.startswith((b"OpusHead", b"OpusTags")))
     finally:
-        lib.espeak_Terminate()
+        source.cleanup()
+    if not packets:
+        raise RuntimeError("The waiting-room recording could not be decoded")
+    return packets
 
 
 class GreetingAudio(discord.AudioSource):
@@ -58,45 +36,6 @@ class GreetingAudio(discord.AudioSource):
 
     def is_opus(self):
         return True
-
-
-def backup_audio():
-    data = (Path(__file__).with_name("assets") / "waiting-room.dca").read_bytes()
-    packets = []
-    offset = 0
-    while offset < len(data):
-        size, = struct.unpack_from("<H", data, offset)
-        offset += 2
-        if not size or offset + size > len(data):
-            raise ValueError("Invalid greeting packet")
-        packets.append(data[offset:offset + size])
-        offset += size
-    return GreetingAudio(packets)
-
-
-def prepare_audio(greeting):
-    try:
-        import imageio_ffmpeg
-        with tempfile.TemporaryDirectory() as folder:
-            path = Path(folder) / "greeting.wav"
-            # Keep native voice-engine stalls or crashes outside the gateway process.
-            subprocess.run([sys.executable, __file__, str(path)], input=greeting.encode(),
-                           check=True, timeout=8, stdout=subprocess.DEVNULL)
-            with wave.open(str(path)) as audio:
-                pcm = audio.readframes(audio.getnframes())
-                if not any(pcm) or audio.getnframes() < audio.getframerate() // 2:
-                    raise ValueError("Speech engine produced no audible greeting")
-            source = discord.FFmpegOpusAudio(str(path), executable=imageio_ffmpeg.get_ffmpeg_exe())
-            try:
-                packets = [p for p in iter(source.read, b"") if not p.startswith((b"OpusHead", b"OpusTags"))]
-            finally:
-                source.cleanup()
-            if len(packets) < 25:
-                raise ValueError("Encoder produced no playable greeting")
-            return GreetingAudio(packets)
-    except Exception:
-        log.exception("Personalized greeting unavailable. Playing bundled voice clip.")
-        return backup_audio()
 
 
 class WaitingRoom(commands.Cog):
@@ -150,7 +89,7 @@ class WaitingRoom(commands.Cog):
                 vc = await self.connection(room)
                 if me.voice and (me.voice.mute or me.voice.suppress):
                     raise RuntimeError("The bot is server-muted or suppressed in the waiting room")
-                source = await asyncio.to_thread(prepare_audio, greeting)
+                source = GreetingAudio(await asyncio.to_thread(recording_packets))
                 await asyncio.sleep(1)
                 if not member.voice or member.voice.channel != room:
                     return
@@ -174,7 +113,3 @@ class WaitingRoom(commands.Cog):
             except Exception:
                 log.exception("Waiting room speech failed")
                 await room.send(greeting, allowed_mentions=discord.AllowedMentions.none())
-
-
-if __name__ == "__main__":
-    speak_to_file(sys.stdin.buffer.read().decode(), sys.argv[1])
