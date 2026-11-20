@@ -18,6 +18,7 @@ from whitelisted import DepartmentPanel
 from staff_desk import StaffDesk, CallView
 from community_shop import CommunityShop, Purchase
 from waiting_room import WaitingRoom
+from game_hints import GameHints
 from voice_guard import VoiceGuard
 from discord_logs import DiscordLogs, MOD_LOG, post_log
 
@@ -71,6 +72,7 @@ class RiverBot(commands.Bot):
         await self.add_cog(Sessions(DASHBOARD, self))
         await self.add_cog(Verification(self))
         await self.add_cog(VoiceGuard(self))
+        await self.add_cog(GameHints(self, GUILD))
         staff_service = StaffDesk(self)
         await self.add_cog(staff_service)
         self.add_view(CallView(staff_service))

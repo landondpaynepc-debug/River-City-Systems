@@ -336,7 +336,7 @@ class Sessions(commands.Cog):
 
 GAME_LOG_TYPES = {
     'JoinLogs': 'Player joined / left',
-    'KillLogs': 'Player death',
+    'KillLogs': 'In-game kill',
     'CommandLogs': 'In-game command',
     'ModCalls': 'Moderator call',
     'EmergencyCalls': 'Emergency call',
@@ -448,8 +448,10 @@ class GameLogger:
             if not isinstance(data, dict):
                 return
             jail_channel = guild.get_channel(MOD_LOG)
-            for event in game_events(data):
+            events = game_events(data)
+            for event in events:
                 await self.deliver(channel, event)
+            for event in events:
                 if event[2] == 'CommandLogs' and re.match(r'^:(?:jail|unjail|free|kick|ban|unban|warn)(?:\s|$)', str(event[3].get('Command', '')), re.I):
                     if jail_channel:
                         await self.deliver(jail_channel, event)
