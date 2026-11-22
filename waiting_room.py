@@ -146,7 +146,15 @@ class WaitingRoom(commands.Cog):
         receipt_room = await self.bot.receipt_channel(member.guild)
         marker = secrets.token_hex(12)
         nonce = hashlib.sha256(f"wait:{member.id}:{after.session_id}:{before.channel and before.channel.id}".encode()).hexdigest()[:24]
-        receipt = await receipt_room.send(marker, nonce=nonce, silent=True, delete_after=60)
+        try:
+            receipt = await receipt_room.send(marker, nonce=nonce, silent=True, delete_after=60)
+        except discord.NotFound as error:
+            if error.code != 10008:
+                raise
+            # A quick rejoin can reuse a voice session whose previous receipt was deleted.
+            window = int(discord.utils.utcnow().timestamp()) // 2
+            retry_nonce = hashlib.sha256(f"{nonce}:{window}".encode()).hexdigest()[:24]
+            receipt = await receipt_room.send(marker, nonce=retry_nonce, silent=True, delete_after=60)
         if receipt.content != marker:
             return
         try:
