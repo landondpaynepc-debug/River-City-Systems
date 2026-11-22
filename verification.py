@@ -1,3 +1,4 @@
+from staff_access import STAFF_ROLE_ID
 """Verified account access using Bloxlink's guild-scoped API."""
 import asyncio
 import logging
@@ -12,7 +13,7 @@ from discord.ext import commands, tasks
 GUILD = 1491365342646112386
 JOIN_ROLE = 1572082428678373436
 VERIFIED_ROLE = 1572082425528459365
-STAFF_ROLES = (1572082402434613308, 1572274368233611436)
+STAFF_ROLES = (STAFF_ROLE_ID,)
 VERIFY_URL = 'https://blox.link/verify'
 log = logging.getLogger('rivercity.verification')
 

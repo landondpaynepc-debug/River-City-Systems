@@ -1,3 +1,4 @@
+from staff_access import has_staff_role
 from cards import layout, footer
 """River City ER:LC session announcements and member voting."""
 import asyncio
@@ -145,19 +146,6 @@ class Vote(ui.Button):
                 reply = "Your vote is counted. You’ll be mentioned when this session starts."
             await message.edit(view=session_card("ssv", interaction.guild, ids=ids), allowed_mentions=discord.AllowedMentions.none())
         await interaction.followup.send(reply, ephemeral=True)
-
-
-def has_staff_role(member):
-    guild = getattr(member, "guild", None)
-    if guild is None:
-        return False
-    configured = os.getenv("STAFF_ROLE_ID", "").strip()
-    if configured:
-        role = guild.get_role(int(configured)) if configured.isdecimal() else None
-    else:
-        matches = [r for r in guild.roles if r.name.strip().casefold() == "staff"]
-        role = matches[0] if len(matches) == 1 else None
-    return role is not None and not role.is_default() and member.get_role(role.id) is not None
 
 
 class Refresh(ui.Button):

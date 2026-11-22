@@ -9,8 +9,8 @@ import discord
 from discord.ext import commands
 
 from discord_logs import MOD_LOG, post_log
-from sessions import has_staff_role
-from verification import GUILD, STAFF_ROLES
+from staff_access import has_staff_role
+from verification import GUILD
 
 WELCOME = 1572082493715386398
 PREFIX = "rc-staff-v1 "
@@ -20,7 +20,6 @@ log = logging.getLogger("rivercity.staff")
 def staff(member):
     return isinstance(member, discord.Member) and (
         member.guild_permissions.manage_guild or has_staff_role(member)
-        or any(member.get_role(role) for role in STAFF_ROLES)
     )
 
 

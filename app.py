@@ -1,3 +1,4 @@
+from staff_access import STAFF_ROLE_ID
 from cards import layout, read_card, text_parts, FIELD
 import asyncio
 import logging
@@ -29,7 +30,7 @@ GUILD = 1491365342646112386
 WELCOME = 1572082493715386398
 DEST = 1572082450232774727
 PANEL = 1572082489743249591
-SUPPORT = int(os.getenv("SUPPORT_ROLE_ID") or 0)
+SUPPORT = int(os.getenv("SUPPORT_ROLE_ID") or STAFF_ROLE_ID)
 DASHBOARD = 1492006832779165756
 HIGH_RANK = int(os.getenv("HIGH_RANK_ROLE_ID") or 1572082345949790311)
 ticket_lock = asyncio.Lock()
@@ -181,7 +182,7 @@ def ticket_owner(channel):
 def is_staff(member, channel):
     if high_ticket(channel):
         return member.guild_permissions.administrator or bool(HIGH_RANK and member.get_role(HIGH_RANK))
-    if member.guild_permissions.administrator or (SUPPORT and member.get_role(SUPPORT)):
+    if member.guild_permissions.administrator or has_staff_role(member) or member.get_role(SUPPORT):
         return True
     perms = channel.permissions_for(member)
     return perms.manage_threads if isinstance(channel, discord.Thread) else perms.manage_channels
