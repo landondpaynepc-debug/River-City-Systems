@@ -7,7 +7,7 @@ import secrets
 import discord
 import imageio_ffmpeg
 from gtts import gTTS
-from discord.ext import commands
+from discord.ext import commands, tasks
 from discord.gateway import DiscordVoiceWebSocket
 from discord.voice_state import ConnectionFlowState, VoiceConnectionState
 
@@ -84,10 +84,54 @@ class WaitingRoom(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.lock = asyncio.Lock()
+        self.registration_lock = asyncio.Lock()
+        self.owner_message = None
+
+    async def register_voice_worker(self, guild):
+        async with self.registration_lock:
+            if self.owner_message is None:
+                channel = await self.bot.receipt_channel(guild)
+                self.owner_message = await channel.send("Waiting-room voice worker online", silent=True)
+        return self.owner_message
+
+    @commands.Cog.listener()
+    async def on_ready(self):
+        guild = self.bot.get_guild(GUILD)
+        if guild:
+            await self.register_voice_worker(guild)
+            if not self.refresh_registration.is_running():
+                self.refresh_registration.start()
+
+    @tasks.loop(seconds=45)
+    async def refresh_registration(self):
+        try:
+            await self.owner_message.edit(content=self.owner_message.content)
+        except discord.NotFound:
+            self.owner_message = None
+            await self.register_voice_worker(self.bot.get_guild(GUILD))
+        except discord.HTTPException:
+            log.warning("Could not refresh waiting-room worker registration")
+
+    def cog_unload(self):
+        self.refresh_registration.cancel()
+
+    async def owns_voice(self, guild):
+        marker = await self.register_voice_worker(guild)
+        async for message in marker.channel.history(limit=None, after=marker, oldest_first=False):
+            if message.author.id == self.bot.user.id and message.content == marker.content:
+                refreshed = message.edited_at or message.created_at
+                if (discord.utils.utcnow() - refreshed).total_seconds() < 150:
+                    return False
+        return True
 
     async def play(self, room, member):
         async with self.lock:
             if not member.voice or member.voice.channel != room:
+                return
+            if not await self.owns_voice(room.guild):
+                return
+            # Another process can still be finishing a greeting during a deployment.
+            if room.guild.me.voice and room.guild.me.voice.channel and not room.guild.voice_client:
                 return
             perms = room.permissions_for(room.guild.me)
             if not (perms.connect and perms.speak):
@@ -98,7 +142,7 @@ class WaitingRoom(commands.Cog):
                     await vc.disconnect(force=True)
                     vc = None
                 if vc is None:
-                    vc = await room.connect(cls=WaitingRoomVoice, timeout=30, reconnect=True)
+                    vc = await room.connect(cls=WaitingRoomVoice, timeout=30, reconnect=False)
                 elif vc.channel != room:
                     await vc.move_to(room)
                 # Let the joining listener and the encrypted media session become ready.
@@ -139,6 +183,8 @@ class WaitingRoom(commands.Cog):
 
         # Duplicate gateway listeners can overlap during a Render deployment.
         # Only the process whose marker Discord accepted should open a voice session.
+        if not await self.owns_voice(member.guild):
+            return
         receipt_room = await self.bot.receipt_channel(member.guild)
         marker = secrets.token_hex(12)
         nonce = hashlib.sha256(f"wait:{member.id}:{after.session_id}:{before.channel and before.channel.id}".encode()).hexdigest()[:24]
