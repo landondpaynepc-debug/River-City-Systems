@@ -7,11 +7,48 @@ from pathlib import Path
 
 import discord
 from discord.ext import commands
+from discord.gateway import DiscordVoiceWebSocket
+from discord.voice_state import ConnectionFlowState, VoiceConnectionState
 
 from verification import GUILD
 
 ROOM = 1573452372103929856
 log = logging.getLogger("rivercity.waiting")
+
+
+class WaitingRoomSocket(DiscordVoiceWebSocket):
+    # discord.py drops binary messages received before Session Description.
+    pending_sender = None
+
+    async def received_binary_message(self, msg):
+        opcode = msg[2]
+        log.info("Waiting-room voice binary opcode %s", opcode)
+        if opcode == self.MLS_EXTERNAL_SENDER and self._connection.dave_session is None:
+            self.pending_sender = msg[3:]
+        await super().received_binary_message(msg)
+
+    async def received_message(self, msg):
+        if msg["op"] != self.HEARTBEAT_ACK:
+            log.info("Waiting-room voice opcode %s", msg["op"])
+        await super().received_message(msg)
+        session = self._connection.dave_session
+        if session is not None and self.pending_sender is not None:
+            session.set_external_sender(self.pending_sender)
+            self.pending_sender = None
+
+
+class WaitingRoomConnection(VoiceConnectionState):
+    async def _connect_websocket(self, resume):
+        ws = await WaitingRoomSocket.from_connection_state(
+            self, resume=resume, hook=self.hook, seq_ack=getattr(self.ws, "seq_ack", -1)
+        )
+        self.state = ConnectionFlowState.websocket_connected
+        return ws
+
+
+class WaitingRoomVoice(discord.VoiceClient):
+    def create_connection_state(self):
+        return WaitingRoomConnection(self)
 
 
 class Recording(discord.AudioSource):
@@ -58,7 +95,7 @@ class WaitingRoom(commands.Cog):
                     await vc.disconnect(force=True)
                     vc = None
                 if vc is None:
-                    vc = await room.connect(timeout=30, reconnect=True, self_deaf=True)
+                    vc = await room.connect(cls=WaitingRoomVoice, timeout=30, reconnect=True)
                 elif vc.channel != room:
                     await vc.move_to(room)
                 # Let the joining listener and the encrypted media session become ready.
