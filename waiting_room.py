@@ -3,8 +3,6 @@ import hashlib
 import io
 import logging
 import secrets
-import struct
-from pathlib import Path
 
 import discord
 import imageio_ffmpeg
@@ -54,35 +52,13 @@ class WaitingRoomVoice(discord.VoiceClient):
         return WaitingRoomConnection(self)
 
 
-class Recording(discord.AudioSource):
-    """Length-prefixed 20 ms Opus frames from the member-supplied recording."""
-    def __init__(self):
-        self.stream = (Path(__file__).with_name("assets") / "waiting-room.dca").open("rb")
-        self.frames = 0
-        self.finished = False
-
-    def read(self):
-        header = self.stream.read(2)
-        if not header:
-            self.finished = True
-            return b""
-        size, = struct.unpack("<H", header)
-        packet = self.stream.read(size)
-        if not size or len(packet) != size:
-            raise ValueError("Invalid waiting-room recording")
-        self.frames += 1
-        return packet
-
-    def is_opus(self):
-        return True
-
-    def cleanup(self):
-        self.stream.close()
-
-
-def spoken_welcome(room_name, display_name):
+def spoken_welcome(display_name):
+    message = (
+        f"Welcome to River City Roleplay Staff Waiting Room {display_name}! "
+        "Please wait as our staff is reviewing somethings."
+    )
     audio = io.BytesIO()
-    gTTS(f"Welcome to {room_name}, {display_name}!", lang="en", timeout=(2, 3)).write_to_fp(audio)
+    gTTS(message, lang="en", timeout=(2, 5)).write_to_fp(audio)
     return audio.getvalue()
 
 
@@ -139,27 +115,16 @@ class WaitingRoom(commands.Cog):
                 if me and (me.mute or me.suppress):
                     raise PermissionError("The bot is muted or suppressed")
                 await asyncio.sleep(.5)
-                try:
-                    audio = await asyncio.wait_for(
-                        asyncio.to_thread(spoken_welcome, room.name, member.display_name), timeout=5
-                    )
-                    if not member.voice or member.voice.channel != room:
-                        return
-                    intro = discord.FFmpegOpusAudio(
-                        io.BytesIO(audio), pipe=True, executable=imageio_ffmpeg.get_ffmpeg_exe()
-                    )
-                    await play_source(vc, intro)
-                except Exception:
-                    log.warning("Personalized welcome unavailable; playing the recording", exc_info=True)
-                    if vc.is_playing():
-                        vc.stop()
+                audio = await asyncio.wait_for(
+                    asyncio.to_thread(spoken_welcome, member.display_name), timeout=12
+                )
                 if not member.voice or member.voice.channel != room:
                     return
-                source = Recording()
+                source = discord.FFmpegOpusAudio(
+                    io.BytesIO(audio), pipe=True, executable=imageio_ffmpeg.get_ffmpeg_exe()
+                )
                 await play_source(vc, source)
-                if not source.finished or not source.frames:
-                    raise RuntimeError("Discord stopped before the recording finished")
-                log.info("Waiting-room playback finished (%s audio frames)", source.frames)
+                log.info("Waiting-room personalized greeting finished")
             finally:
                 if vc:
                     await vc.disconnect(force=True)
