@@ -158,7 +158,7 @@ class WaitingRoom(commands.Cog):
         if receipt.content != marker:
             return
         try:
-            await asyncio.gather(self.greet(room), self.play(room, member))
+            await self.play(room, member)
         except Exception:
             log.exception("Waiting-room greeting failed for channel %s", ROOM)
         finally:
@@ -166,18 +166,3 @@ class WaitingRoom(commands.Cog):
                 await receipt.delete()
             except discord.HTTPException:
                 pass
-
-    async def greet(self, room):
-        panel = discord.ui.LayoutView(timeout=None)
-        panel.add_item(discord.ui.Container(
-            discord.ui.TextDisplay(
-                "Hello and thanks for contacting our Faculty Team. "
-                "Please wait momentarily while we review a few things."
-            ),
-            discord.ui.TextDisplay("-# River City Roleplay | Faculty Team"),
-            accent_colour=discord.Colour(0x246BCE),
-        ))
-        try:
-            await room.send(view=panel, allowed_mentions=discord.AllowedMentions.none())
-        except discord.HTTPException:
-            log.exception("Could not post Faculty Team greeting in waiting room %s", ROOM)
