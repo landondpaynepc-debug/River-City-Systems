@@ -79,7 +79,7 @@ class RiverBot(commands.Bot):
         self.add_view(CallView(staff_service))
         await self.add_cog(CommunityShop(self))
         self.add_view(Purchase(self))
-        await self.add_cog(WaitingRoom())
+        await self.add_cog(WaitingRoom(self))
         await self.add_cog(DiscordLogs(self, GUILD))
         self.add_view(session_card("ssv", None))
         self.add_view(session_card("info", None, numbers="Loading counts…"))
