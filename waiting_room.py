@@ -1,4 +1,9 @@
+import asyncio
+import hashlib
 import logging
+import secrets
+import struct
+from pathlib import Path
 
 import discord
 from discord.ext import commands
@@ -9,7 +14,88 @@ ROOM = 1573452372103929856
 log = logging.getLogger("rivercity.waiting")
 
 
+class Recording(discord.AudioSource):
+    """Length-prefixed 20 ms Opus frames from the member-supplied recording."""
+    def __init__(self):
+        self.stream = (Path(__file__).with_name("assets") / "waiting-room.dca").open("rb")
+        self.frames = 0
+        self.finished = False
+
+    def read(self):
+        header = self.stream.read(2)
+        if not header:
+            self.finished = True
+            return b""
+        size, = struct.unpack("<H", header)
+        packet = self.stream.read(size)
+        if not size or len(packet) != size:
+            raise ValueError("Invalid waiting-room recording")
+        self.frames += 1
+        return packet
+
+    def is_opus(self):
+        return True
+
+    def cleanup(self):
+        self.stream.close()
+
+
 class WaitingRoom(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+        self.lock = asyncio.Lock()
+
+    async def play(self, room, member):
+        async with self.lock:
+            if not member.voice or member.voice.channel != room:
+                return
+            perms = room.permissions_for(room.guild.me)
+            if not (perms.connect and perms.speak):
+                raise PermissionError("Connect and Speak are required in the waiting room")
+            vc = room.guild.voice_client
+            try:
+                if vc and not vc.is_connected():
+                    await vc.disconnect(force=True)
+                    vc = None
+                if vc is None:
+                    vc = await room.connect(timeout=30, reconnect=True, self_deaf=True)
+                elif vc.channel != room:
+                    await vc.move_to(room)
+                # Let the joining listener and the encrypted media session become ready.
+                for _ in range(150):
+                    state = vc._connection
+                    if vc.is_connected() and (not state.dave_protocol_version or state.can_encrypt):
+                        break
+                    await asyncio.sleep(.2)
+                else:
+                    raise TimeoutError("Discord media negotiation timed out")
+                if not member.voice or member.voice.channel != room:
+                    return
+                me = room.guild.me.voice
+                if me and (me.mute or me.suppress):
+                    raise PermissionError("The bot is muted or suppressed")
+                await asyncio.sleep(.5)
+                loop = asyncio.get_running_loop()
+                done = loop.create_future()
+                def finish(error):
+                    if not done.done():
+                        done.set_result(error)
+                source = Recording()
+                try:
+                    vc.play(source, after=lambda error: loop.call_soon_threadsafe(finish, error))
+                except BaseException:
+                    source.cleanup()
+                    raise
+                error = await asyncio.wait_for(done, timeout=30)
+                if error:
+                    raise error
+                if not source.finished or not source.frames:
+                    raise RuntimeError("Discord stopped before the recording finished")
+                log.info("Waiting-room playback finished (%s audio frames)", source.frames)
+            finally:
+                if vc:
+                    await vc.disconnect(force=True)
+
     @commands.Cog.listener()
     async def on_voice_state_update(self, member, before, after):
         room = after.channel
@@ -18,6 +104,25 @@ class WaitingRoom(commands.Cog):
         if before.channel and before.channel.id == ROOM:
             return
 
+        # Duplicate gateway listeners can overlap during a Render deployment.
+        # Only the process whose marker Discord accepted should open a voice session.
+        receipt_room = await self.bot.receipt_channel(member.guild)
+        marker = secrets.token_hex(12)
+        nonce = hashlib.sha256(f"wait:{member.id}:{after.session_id}:{before.channel and before.channel.id}".encode()).hexdigest()[:24]
+        receipt = await receipt_room.send(marker, nonce=nonce, silent=True, delete_after=60)
+        if receipt.content != marker:
+            return
+        try:
+            await asyncio.gather(self.greet(room), self.play(room, member))
+        except Exception:
+            log.exception("Waiting-room greeting failed for channel %s", ROOM)
+        finally:
+            try:
+                await receipt.delete()
+            except discord.HTTPException:
+                pass
+
+    async def greet(self, room):
         panel = discord.ui.LayoutView(timeout=None)
         panel.add_item(discord.ui.Container(
             discord.ui.TextDisplay(
